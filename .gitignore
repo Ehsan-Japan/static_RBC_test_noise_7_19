@@ -1,0 +1,56 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- Non-code content (papers, slides, manuscripts) ---
+/citations/
+/docs/
+*.pdf
+*.docx
+*.doc
+*.pptx
+*.ppt
+*.lnk
+
+# --- Saved web page export ---
+DQD Simulation Pipeline — Program Structure.html
+DQD Simulation Pipeline — Program Structure_files/
+
+# --- Office lock/temp files ---
+~$*
+~WRL*.tmp
+
+# --- Generated / large data & results (reproducible from code) ---
+/data/
+/training_data/
+/results/
+/archive/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+
+# --- Claude Code local state ---
+.claude/settings.local.json
