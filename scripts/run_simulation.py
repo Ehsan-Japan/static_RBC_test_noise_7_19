@@ -12,7 +12,7 @@ def main():
         base_save_dir="training_data",
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=1900,
+        n_samples=20,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,
