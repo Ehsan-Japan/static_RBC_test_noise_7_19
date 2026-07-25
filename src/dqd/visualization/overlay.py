@@ -6,7 +6,7 @@ import os
 import re
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 
 class OverlayRenderer:
@@ -550,6 +550,19 @@ class OverlayRenderer:
         rays_dict: Dict,
         peaks_dict: Dict,
         show_measured_points: bool = True,
+        show_ray_peaks: Optional[bool] = None,
+        ray_peak_color: Optional[str] = None,
+        ray_peak_size: float = 80,
+        ray_peak_marker: str = "x",
+        ray_peak_linewidths: float = 2,
+        ray_peak_edgecolor: Optional[str] = None,
+        ray_peak_label: Optional[str] = None,
+        break_points: Optional[Sequence[Tuple[float, float]]] = None,
+        break_connections: Optional[
+            Sequence[Tuple[Tuple[float, float], Tuple[float, float]]]
+        ] = None,
+        break_point_size: float = 130,
+        legend_fontsize: int = 8,
     ) -> None:
         """
         Like :meth:`visualize_grid_2d` but also overlays ray paths and ray peaks.
@@ -563,7 +576,23 @@ class OverlayRenderer:
         output_file    : where to save summary_total.png
         rays_dict      : {angle_float: {"X": ..., "Y": ..., "Current": ...}}
         peaks_dict     : {angle_float: {"vx": [...], "vy": [...]}}
+        show_measured_points : draw the swept/measured cells (blue dots)
+        show_ray_peaks : draw the per-ray peak crosses (defaults to
+                         ``show_measured_points``)
+        ray_peak_color : if given, EVERY ray-peak cross is drawn in this single
+                         colour and gets one shared legend entry.  When ``None``
+                         each ray angle keeps its own tab10 colour and the
+                         crosses stay out of the legend (original behaviour).
+        ray_peak_size / ray_peak_marker / ray_peak_linewidths /
+        ray_peak_edgecolor  : marker styling for the ray-peak crosses.
+        ray_peak_label : legend label used with ``ray_peak_color``.
+        break_points   : [(vx, vy), ...] break points to overlay (orange ^)
+        break_connections : [((vx1, vy1), (vx2, vy2)), ...] dashed connections
+                         between the break points that were paired up.
+        legend_fontsize : font size of the legend (bigger for publication).
         """
+        if show_ray_peaks is None:
+            show_ray_peaks = show_measured_points
         data = np.load(file_path)
         res_y, res_x = data.shape
 
@@ -602,6 +631,7 @@ class OverlayRenderer:
         # ---- Ray traces and ray peaks (snapped to grid cell centres) ----
         sorted_angles = sorted(rays_dict.keys())
         color_cycle = plt.cm.tab10(np.linspace(0, 1, max(len(sorted_angles), 1)))
+        uniform_ray_peaks: List[Tuple[float, float]] = []
         for idx, angle in enumerate(sorted_angles):
             ray_data = rays_dict[angle]
             if show_measured_points:
@@ -609,15 +639,50 @@ class OverlayRenderer:
                 rxs, rys = _to_centers(ray_coords)
                 ax.scatter(rxs, rys, color="blue", s=10, alpha=0.5,
                            label="_nolegend_")
-            if show_measured_points and angle in peaks_dict:
+            if show_ray_peaks and angle in peaks_dict:
                 pvx = peaks_dict[angle]["vx"]
                 pvy = peaks_dict[angle]["vy"]
                 if pvx:
                     peak_coords = list(zip(pvx, pvy))
-                    pxs, pys = _to_centers(peak_coords)
-                    ax.scatter(pxs, pys, marker="x",
-                               color=color_cycle[idx], s=80, linewidths=2,
-                               zorder=6, label="_nolegend_")
+                    if ray_peak_color is not None:
+                        # One colour for all of them -> collect and draw once so
+                        # the legend gets a single entry.
+                        uniform_ray_peaks.extend(peak_coords)
+                    else:
+                        pxs, pys = _to_centers(peak_coords)
+                        ax.scatter(pxs, pys, marker=ray_peak_marker,
+                                   color=color_cycle[idx], s=ray_peak_size,
+                                   linewidths=ray_peak_linewidths,
+                                   zorder=6, label="_nolegend_")
+
+        if uniform_ray_peaks:
+            pxs, pys = _to_centers(uniform_ray_peaks)
+            scatter_kw = dict(
+                marker=ray_peak_marker,
+                s=ray_peak_size,
+                linewidths=ray_peak_linewidths,
+                zorder=7,
+                label=ray_peak_label or "Sweep Start Points",
+            )
+            if ray_peak_edgecolor is not None:
+                scatter_kw.update(facecolors=ray_peak_color,
+                                  edgecolors=ray_peak_edgecolor)
+            else:
+                scatter_kw.update(color=ray_peak_color)
+            ax.scatter(pxs, pys, **scatter_kw)
+
+        # ---- Break points (honeycomb-vertex kinks) and their connections ----
+        if break_connections:
+            for i, ((vx1, vy1), (vx2, vy2)) in enumerate(break_connections):
+                ax.plot([vx1, vx2], [vy1, vy2], "--", color="lime", lw=1.8,
+                        zorder=8,
+                        label="Break-Point Connections" if i == 0 else "_nolegend_")
+        if break_points:
+            bxs = [p[0] for p in break_points]
+            bys = [p[1] for p in break_points]
+            ax.scatter(bxs, bys, marker="^", s=break_point_size,
+                       facecolors="orange", edgecolors="black", linewidths=1.2,
+                       zorder=9, label="Break Points")
 
         ax.set_xlabel("Vx (V)")
         ax.set_ylabel("Vy (V)")
@@ -631,7 +696,7 @@ class OverlayRenderer:
         handles, labels = ax.get_legend_handles_labels()
         ax.legend(handles=[transition_patch] + handles,
                   labels=["Transition Lines (Ground Truth)"] + labels,
-                  loc="upper right", fontsize=8)
+                  loc="upper right", fontsize=legend_fontsize)
 
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close()

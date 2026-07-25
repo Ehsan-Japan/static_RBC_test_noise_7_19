@@ -40,6 +40,10 @@ def detect_interdot(
     vy_max: float,
     neighbor_px: int = 4,
     connect_px: int = 50,
+    min_slope_change: float = 0.8,
+    kink_window_frac: float = 1.0 / 6.0,
+    kink_window_max: int = 0,
+    min_line_pts: int = 5,
 ) -> List[Tuple[float, float]]:
     """
     Detect interdot transition peaks for one sample and save results.
@@ -49,8 +53,25 @@ def detect_interdot(
     sample_dir          : the sample folder (…/sample_i)
     charge_sensing_path : path to charge_sensing_data.npy  [Vx, Vy, z]
     vx_min/max, vy_min/max : voltage extent (for plotting)
-    neighbor_px         : two peaks this close (grid pixels) are the same line
+    neighbor_px         : two peaks this close (grid pixels) are the same line.
+                          Smaller keeps nearly-touching lines separate (more
+                          break-point pairs survive the "different line" rule);
+                          larger merges thick/broken bands into one line.
     connect_px          : max gap between break points of different lines
+    min_slope_change    : a line only yields a break point if its local slope
+                          changes by more than this (grid-pixel slope units).
+                          THE dominant reason break points go undetected —
+                          shallow honeycomb vertices change the slope by only
+                          ~0.3-0.6 and are silently rejected at 0.8.
+    kink_window_frac    : slope-comparison half-window as a fraction of the
+                          line length.  Bigger = more smoothing = kinks on
+                          long lines get straightened away.
+    kink_window_max     : hard cap on that half-window in pixels (0 = no cap).
+                          Capping it keeps long lines as kink-sensitive as
+                          short ones.
+    min_line_pts        : a group needs at least this many points (and this
+                          many distinct steps along its long axis) to be
+                          considered a line at all.
 
     Returns
     -------
@@ -78,7 +99,13 @@ def detect_interdot(
     lines = _group_lines(grid_peaks, neighbor_px)
 
     # --- 3. break points = the two far ends of every line ---
-    break_pts = _break_points(lines)              # list of (line_id, (row, col))
+    break_pts = _break_points(                    # list of (line_id, (row, col))
+        lines,
+        min_slope_change=min_slope_change,
+        kink_window_frac=kink_window_frac,
+        kink_window_max=kink_window_max,
+        min_line_pts=min_line_pts,
+    )
 
     # --- 4. connect closest break points from different lines ---
     connections = _connect(break_pts, connect_px)
@@ -103,6 +130,12 @@ def detect_interdot(
 
     _write_txt(sample_dir, interdot_v)              # tracking log (sample level)
     _write_voltage_coords(sample_dir, interdot_v)   # feeds images + evaluation
+    _write_break_points(                            # feeds the *_with_breaking_points images
+        sample_dir,
+        [_to_voltage(r, c, ux, uy) for _, (r, c) in break_pts],
+        [(_to_voltage(r1, c1, ux, uy), _to_voltage(r2, c2, ux, uy))
+         for (r1, c1), (r2, c2) in connections],
+    )
     _plot(sample_dir, current_2d, peaks_v, break_pts, connections, interdot_v,
           ux, uy, vx_min, vx_max, vy_min, vy_max)
     return interdot_v
@@ -142,6 +175,9 @@ def _group_lines(
 def _break_points(
     lines: List[List[Tuple[int, int]]],
     min_slope_change: float = 0.8,
+    kink_window_frac: float = 1.0 / 6.0,
+    kink_window_max: int = 0,
+    min_line_pts: int = 5,
 ) -> List[Tuple[int, Tuple[int, int]]]:
     """
     One break point per line: the peak where the line's local slope changes
@@ -150,29 +186,33 @@ def _break_points(
     """
     breaks: List[Tuple[int, Tuple[int, int]]] = []
     for line_id, line in enumerate(lines):
-        kink = _line_kink(line, min_slope_change)
+        kink = _line_kink(line, min_slope_change,
+                          kink_window_frac, kink_window_max, min_line_pts)
         if kink is not None:
             breaks.append((line_id, kink))
     return breaks
 
 
-def _line_kink(line, min_slope_change):
+def _line_kink(line, min_slope_change,
+               kink_window_frac=1.0 / 6.0, kink_window_max=0, min_line_pts=5):
     """Return the (row, col) where the line bends the most, or None."""
     pts = np.array(line, dtype=float)
-    if len(pts) < 5:
+    if len(pts) < min_line_pts:
         return None
 
     # Track the line along whichever axis it spans more (row or col),
     # collapsing the thick band to one value per step (its mean).
     key, val = (0, 1) if np.ptp(pts[:, 0]) >= np.ptp(pts[:, 1]) else (1, 0)
     uk = np.unique(pts[:, key])
-    if len(uk) < 5:
+    if len(uk) < min_line_pts:
         return None
     tv = np.array([pts[pts[:, key] == u, val].mean() for u in uk])
 
     # Compare the slope a window before vs a window after each interior point;
     # the largest change in slope is the kink.
-    w = max(1, len(uk) // 6)
+    w = max(1, int(len(uk) * kink_window_frac))
+    if kink_window_max > 0:
+        w = min(w, kink_window_max)
     best = None
     for i in range(w, len(uk) - w):
         s_before = (tv[i] - tv[i - w]) / (uk[i] - uk[i - w] + 1e-9)
@@ -281,6 +321,54 @@ def _write_voltage_coords(
         f.write("Scanned Cells (Voltage Coordinates):\n\n")
         f.write("Peaks (Voltage Coordinates):\n")
         f.write(peaks_str + "\n")
+
+
+BREAK_POINTS_FILE = "break_points.txt"
+
+
+def _write_break_points(
+    sample_dir: str,
+    break_v: List[Tuple[float, float]],
+    connections_v: List[Tuple[Tuple[float, float], Tuple[float, float]]],
+) -> None:
+    """
+    Save the break points and the pairs that were connected, in voltage
+    coordinates, so the sample overlays can draw them without re-running the
+    detection.  Read back with :func:`load_break_points`.
+    """
+    out = os.path.join(sample_dir, BREAK_POINTS_FILE)
+    with open(out, "w") as f:
+        f.write("Break Points (Voltage Coordinates):\n")
+        f.write(", ".join(f"({vx:.6f}, {vy:.6f})" for vx, vy in break_v) + "\n\n")
+        f.write("Connections (Voltage Coordinate Pairs):\n")
+        for (vx1, vy1), (vx2, vy2) in connections_v:
+            f.write(f"({vx1:.6f}, {vy1:.6f}) -> ({vx2:.6f}, {vy2:.6f})\n")
+    print(f"[interdot_simple] saved -> {out}")
+
+
+def load_break_points(
+    sample_dir: str,
+) -> Tuple[List[Tuple[float, float]],
+           List[Tuple[Tuple[float, float], Tuple[float, float]]]]:
+    """Inverse of :func:`_write_break_points`; ([], []) if the file is missing."""
+    path = os.path.join(sample_dir, BREAK_POINTS_FILE)
+    if not os.path.isfile(path):
+        return [], []
+    with open(path) as f:
+        txt = f.read()
+
+    def _pairs(seg: str) -> List[Tuple[float, float]]:
+        return [(float(a), float(b)) for a, b in
+                re.findall(r"\(([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)\)", seg)]
+
+    head, _, tail = txt.partition("Connections (Voltage Coordinate Pairs):")
+    break_v = _pairs(head)
+    connections_v = []
+    for line in tail.splitlines():
+        pts = _pairs(line)
+        if len(pts) == 2:
+            connections_v.append((pts[0], pts[1]))
+    return break_v, connections_v
 
 
 def _write_txt(sample_dir: str, interdot_v: List[Tuple[float, float]]) -> None:

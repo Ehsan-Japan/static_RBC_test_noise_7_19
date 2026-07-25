@@ -46,6 +46,19 @@ class DatasetPipeline:
     fixed_matrices       : if provided, every sample uses this capacitance dict
                            instead of random generation (keys: Cdd, Cgd, Cds, Cgs)
     config               : optional CapacitanceConfig; uses defaults if None
+
+    Interdot break-point hyperparameters (see analysis/interdot_simple.py):
+    interdot_neighbor_px      : peaks within this many grid pixels are treated
+                                as the same dot-to-lead line
+    interdot_connect_px       : max gap between break points of different lines
+    interdot_min_slope_change : minimum local slope change for a line to yield
+                                a break point (main sensitivity knob)
+    interdot_kink_window_frac : slope-comparison half-window as a fraction of
+                                line length (smoothing)
+    interdot_kink_window_max  : hard cap on that half-window, in pixels
+                                (0 = uncapped)
+    interdot_min_line_pts     : minimum points / steps for a group to count
+                                as a line
     """
 
     def __init__(
@@ -71,6 +84,13 @@ class DatasetPipeline:
         config: Optional[CapacitanceConfig] = None,
         # ── Evaluation hyperparameters ────────────────────────────────
         peak_neighbor_cols: int = 0,
+        # ── Interdot break-point hyperparameters ──────────────────────
+        interdot_neighbor_px: int = 4,
+        interdot_connect_px: int = 50,
+        interdot_min_slope_change: float = 0.8,
+        interdot_kink_window_frac: float = 1.0 / 6.0,
+        interdot_kink_window_max: int = 0,
+        interdot_min_line_pts: int = 5,
     ):
         self.base_save_dir = base_save_dir
         self.n_samples = n_samples
@@ -97,6 +117,12 @@ class DatasetPipeline:
         self.config = config or CapacitanceConfig()
         self.angles = np.linspace(0, 90, num_angles + 2)[1:-1]
         self.peak_neighbor_cols = peak_neighbor_cols
+        self.interdot_neighbor_px = interdot_neighbor_px
+        self.interdot_connect_px = interdot_connect_px
+        self.interdot_min_slope_change = interdot_min_slope_change
+        self.interdot_kink_window_frac = interdot_kink_window_frac
+        self.interdot_kink_window_max = interdot_kink_window_max
+        self.interdot_min_line_pts = interdot_min_line_pts
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -109,6 +135,14 @@ class DatasetPipeline:
             f"_rays_{self.num_angles}"
             f"_res_{self.ray_resolution}"
             f"_image_res_{self.x_resolution}"
+            # interdot break-point hyperparameters, so runs with different
+            # settings land in different folders and stay comparable
+            f"_nb_{self.interdot_neighbor_px}"
+            f"_cx_{self.interdot_connect_px}"
+            f"_sl_{self.interdot_min_slope_change:g}"
+            f"_wf_{self.interdot_kink_window_frac:.3g}"
+            f"_wm_{self.interdot_kink_window_max}"
+            f"_mlp_{self.interdot_min_line_pts}"
         )
         save_dir = os.path.join(self.base_save_dir, run_folder)
         os.makedirs(save_dir, exist_ok=True)
@@ -253,6 +287,12 @@ class DatasetPipeline:
                 vx_max=vs["vx_max"],
                 vy_min=vs["vy_min"],
                 vy_max=vs["vy_max"],
+                neighbor_px=self.interdot_neighbor_px,
+                connect_px=self.interdot_connect_px,
+                min_slope_change=self.interdot_min_slope_change,
+                kink_window_frac=self.interdot_kink_window_frac,
+                kink_window_max=self.interdot_kink_window_max,
+                min_line_pts=self.interdot_min_line_pts,
             )
         except Exception as exc:
             import traceback
@@ -544,6 +584,54 @@ class DatasetPipeline:
                     show_measured_points=False,
                     **_ray_kwargs,
                 )
+
+                # Publication figure: the per-ray peak crosses all mean the same
+                # thing (the start point of a directional sweep), so draw them
+                # large, in ONE colour, with a single legend entry.
+                _cross_kwargs = dict(
+                    ray_peak_color="magenta",
+                    ray_peak_marker="X",
+                    ray_peak_size=420,
+                    ray_peak_linewidths=1.6,
+                    ray_peak_edgecolor="black",
+                    ray_peak_label="Directional Sweep Start Points",
+                    legend_fontsize=14,
+                )
+                OverlayRenderer.visualize_grid_2d_with_rays(
+                    output_file=os.path.join(
+                        sample_dir, "summary_total_all_crosses.png"
+                    ),
+                    **_cross_kwargs,
+                    **_ray_kwargs,
+                )
+
+                # Publication figures: same as summary_total / summary_peaks_only
+                # but with the interdot break points and their connections on top.
+                from ..analysis.interdot_simple import load_break_points
+                break_points, break_connections = load_break_points(sample_dir)
+                if break_points or break_connections:
+                    _break_kwargs = dict(
+                        break_points=break_points,
+                        break_connections=break_connections,
+                        break_point_size=300,
+                        legend_fontsize=14,
+                    )
+                    OverlayRenderer.visualize_grid_2d_with_rays(
+                        output_file=os.path.join(
+                            sample_dir, "summary_total_with_breaking_points.png"
+                        ),
+                        **_break_kwargs,
+                        **_ray_kwargs,
+                    )
+                    OverlayRenderer.visualize_grid_2d_with_rays(
+                        output_file=os.path.join(
+                            sample_dir,
+                            "summary_peaks_only_with_breaking_points.png",
+                        ),
+                        show_measured_points=False,
+                        **_break_kwargs,
+                        **_ray_kwargs,
+                    )
 
     # ------------------------------------------------------------------
     # Ray processing helper  (replaces process_and_plot + dqd_processor)
