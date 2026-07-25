@@ -236,6 +236,29 @@ class DatasetPipeline:
                     print(f"  [WARN] Peak {peak_idx} (angle {angle_str}) failed: {exc}")
                     traceback.print_exc()
 
+        # ---- 6.5 Interdot transitions (break-point connection) ----
+        # After ALL sweeping is done, connect the closest break points (where a
+        # tracked line's slope changes) and scan the sensor gradient there to
+        # find the positive-slope interdot transitions the amplitude sweeps
+        # miss.  Runs BEFORE the overlays and evaluation so that both the final
+        # images and evaluation.txt include the interdot peaks (they are written
+        # into cropped_results/interdot_peaks/voltage_coordinates.txt, which the
+        # overlays and the evaluator both walk).
+        try:
+            from ..analysis.interdot_simple import detect_interdot
+            detect_interdot(
+                sample_dir=sample_dir,
+                charge_sensing_path=charge_sensing_path,
+                vx_min=vs["vx_min"],
+                vx_max=vs["vx_max"],
+                vy_min=vs["vy_min"],
+                vy_max=vs["vy_max"],
+            )
+        except Exception as exc:
+            import traceback
+            print(f"  [WARN] Interdot detection failed: {exc}")
+            traceback.print_exc()
+
         # ---- 7. Sample-level overlays ----
         try:
             self._generate_sample_overlays(

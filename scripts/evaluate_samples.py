@@ -34,9 +34,9 @@ import re
 DATA_DIR = os.path.join(
     os.path.dirname(__file__), "..",
     "training_data",
-    "num_1800_rays_6_res_100_image_res_100",
+    "num_30_rays_6_res_100_image_res_100",
 )
-N_SAMPLES = 100
+N_SAMPLES = 30
 
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
