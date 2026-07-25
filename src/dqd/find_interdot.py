@@ -1,400 +1,440 @@
+"""
+find_interdot.py — interdot transition detection by break-point pairing.
+
+Why interdot lines are hard
+---------------------------
+In a double dot, the charge-stability diagram has two kinds of boundary:
+
+  * **dot-to-lead** lines, where a carrier enters or leaves a dot from the
+    reservoir.  The total charge on the double-dot changes, so the nearby
+    charge sensor sees a large potential step.  High contrast, easy to find.
+
+  * **interdot** lines, where a carrier moves *between* the two dots:
+    (m+1, n) <-> (m, n+1).  Total charge is unchanged; only the dipole moves.
+    The sensor response is therefore weak — often an order of magnitude below
+    the dot-to-lead contrast — and it scales with the sensor's *asymmetry*
+    between the two dots (the difference of the two dot-to-sensor
+    capacitances, ``Cds[0] - Cds[1]``).  A perfectly symmetric sensor sees
+    nothing at all.
+
+Any detector that thresholds on sensor contrast will therefore find the
+dot-to-lead lines and miss the interdot lines.  That is the gap this stage
+closes, and it does so without ever thresholding on contrast.
+
+The idea: vertices are kinks, not endpoints
+-------------------------------------------
+The original formulation of this method reasoned that a line-follower fails
+where the line it is tracking ends, and that dot-to-lead lines end at triple
+points -- so a tracker's last successful cell ("break point") estimates a
+vertex.
+
+Measurement shows that premise is wrong, and it is worth being precise about
+why.  The charge-stability boundary network is *connected*: at a triple point
+three boundaries meet, so a boundary does not terminate there, it **branches**.
+A tracker arriving at a vertex therefore does not lose the ridge -- it follows
+the ridge around the corner onto the adjacent family.  In practice almost
+every sweep runs until it leaves the voltage window, and pairing those exits
+pairs window edges, not vertices.  (This is exactly the failure visible in
+``analysis/peak_detector.py``'s ``_find_interdot_by_breakpoints``.)
+
+The recoverable signal is the **kink**.  The two dot-to-lead families have
+distinct slopes, fixed by the gate-to-dot capacitance ratios:
+
+    dot-1 line :  dV_P2/dV_P1 = -C_g1d1 / C_g2d1     (steep)
+    dot-2 line :  dV_P2/dV_P1 = -C_g1d2 / C_g2d2     (shallow)
+
+so where a tracked polyline turns from one slope to the other, it has passed a
+triple point.  Detecting that turn requires no extra measurement at all: it is
+post-processing of the trajectory already recorded by the sweep.
+
+Between two adjacent triple points lies exactly one interdot transition.  So
+paired kinks give the interdot segment by geometry, with no contrast threshold
+anywhere -- which is the point, because the interdot contrast is precisely
+what is too weak to threshold on.
+
+Algorithm
+---------
+1. **Collect** vertex candidates.  Primary source: kinks in each tracked
+   polyline (``PeakDetector``'s ``sr["peaks"]`` sequences, one per sweep).
+   Secondary source (retained for ablation, and matching the original
+   proposal): "lost_line" break points, i.e. sweeps that genuinely failed
+   rather than exiting the window.
+2. **Pair** candidates by mutual nearest neighbour within ``max_gap`` pixels.
+   Mutual (rather than greedy one-directional) pairing is used because greedy
+   pairing depends on iteration order and can chain three break points into a
+   spurious pair.
+3. **Verify** each candidate segment: read the charge-sensor grid along it,
+   and along two reference segments displaced perpendicular by ``offset``
+   pixels.  Accept if the on-segment mean exceeds the off-segment mean by
+   ``min_contrast`` (in units of the local standard deviation).  This is a
+   *relative* test, so it survives the weak absolute contrast of an interdot
+   line.
+4. **Emit** the rasterised segment as predicted transition pixels, and its two
+   endpoints as estimated triple-point locations.
+
+Step 4 is where this differs most from a naive implementation that returns
+only the single brightest cell on the segment: the interdot transition is a
+segment, not a point, so returning the segment is both more useful and
+scores properly under a line-detection metric.
+
+Note on ``Device``: the version of this module this was ported from assumed
+an instrumented ``Device`` object (``device.measure(r, c)``, a measurement
+budget, ``device.stage(...)``).  This codebase has no such abstraction —
+simulated data already lives in full-grid ``.npy`` arrays (see
+``simulation/dqd_simulator.py``), so "measuring" a cell here is just indexing
+the array.  ``detect()`` below takes the 2-D charge-sensor grid directly
+instead of a ``Device``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Tuple
+
 import numpy as np
-from collections import defaultdict, deque
-from scipy.spatial import cKDTree
 
 
-def fit_line_pca(points):
+@dataclass
+class InterdotSegment:
+    a: Tuple[int, int]              # first break point (estimated triple point)
+    b: Tuple[int, int]              # second break point
+    pixels: np.ndarray              # (K,2) rasterised segment cells
+    contrast: float                 # verification statistic (higher = stronger)
+    accepted: bool
+
+
+# ---------------------------------------------------------------------------
+# vertex candidates from tracked polylines
+# ---------------------------------------------------------------------------
+
+
+def find_kinks(
+    polyline: np.ndarray,
+    window: int = 5,
+    min_jump: float = 0.30,
+    min_sep: int = 4,
+) -> List[Tuple[int, int]]:
+    """Locate slope discontinuities along one tracked transition line.
+
+    ``polyline`` is the (K,2) sequence of (row, col) peaks produced by a
+    ``PeakDetector`` sweep (``sr["peaks"]`` with the ``None``-column rows
+    dropped), ordered along the walk.
+
+    The local slope dcol/drow is smoothed over ``window`` steps and its
+    first difference is taken; a kink is a local maximum of |d slope| above
+    ``min_jump``.  ``min_jump`` is in columns-per-row, so 0.30 means the line
+    must change direction by roughly a third of a cell per row -- comfortably
+    above tracking jitter, comfortably below the slope difference between the
+    two dot-to-lead families for any capacitance set that produces a visible
+    honeycomb.
+
+    Costs nothing: no grid access, pure post-processing of a trajectory
+    already collected by the sweep.
     """
-    Fit a 2D line using PCA / total least squares.
-    Returns:
-        center, direction, slope, intercept, proj_min, proj_max, endpoints
+    p = np.asarray(polyline, dtype=float).reshape(-1, 2)
+    if len(p) < 2 * window + 2:
+        return []
+
+    dr = np.diff(p[:, 0])
+    dc = np.diff(p[:, 1])
+    slope = dc / np.where(np.abs(dr) < 1e-9, 1.0, dr)
+
+    kernel = np.ones(window) / window
+    smooth = np.convolve(slope, kernel, mode="valid")
+    jump = np.abs(np.diff(smooth))
+    if not len(jump):
+        return []
+
+    order = np.argsort(jump)[::-1]
+    picked: List[int] = []
+    for idx in order:
+        if jump[idx] < min_jump:
+            break
+        if all(abs(idx - q) >= min_sep for q in picked):
+            picked.append(int(idx))
+
+    off = window // 2
+    out: List[Tuple[int, int]] = []
+    for idx in picked:
+        k = min(len(p) - 1, idx + off + 1)
+        out.append((int(p[k, 0]), int(p[k, 1])))
+    return out
+
+
+def find_kink_indices(
+    polyline: np.ndarray,
+    window: int = 5,
+    min_jump: float = 0.30,
+    min_sep: int = 4,
+) -> List[int]:
+    """Same detection as find_kinks, but returns polyline indices."""
+    p = np.asarray(polyline, dtype=float).reshape(-1, 2)
+    if len(p) < 2 * window + 2:
+        return []
+    dr = np.diff(p[:, 0])
+    dc = np.diff(p[:, 1])
+    slope = dc / np.where(np.abs(dr) < 1e-9, 1.0, dr)
+    smooth = np.convolve(slope, np.ones(window) / window, mode="valid")
+    jump = np.abs(np.diff(smooth))
+    if not len(jump):
+        return []
+    picked: List[int] = []
+    for idx in np.argsort(jump)[::-1]:
+        if jump[idx] < min_jump:
+            break
+        if all(abs(idx - q) >= min_sep for q in picked):
+            picked.append(int(idx))
+    off = window // 2
+    return [min(len(p) - 1, i + off + 1) for i in picked]
+
+
+def refine_vertex(
+    polyline: np.ndarray,
+    kink_index: int,
+    fit_len: int = 8,
+    min_slope_diff: float = 0.25,
+) -> Optional[Tuple[float, float]]:
+    """Sub-pixel triple point: intersect the two fitted line segments.
+
+    Taking the kink *cell* as the vertex is accurate only to the tracker's
+    step size, typically 1-4 px.  That is fatal here, because the interdot
+    segment is itself only ~5 px long: a +/-3 px error on each endpoint can
+    flip the sign of the segment's slope, and the positive-slope test -- which
+    is exact in ground truth -- then rejects genuine pairs.
+
+    Fitting instead uses every point of both incoming line arms.  Each arm is
+    a straight transition line with a well-defined slope set by capacitance
+    ratios, so ``col = a*row + b`` is fitted on each side and the vertex is
+    their intersection.  Error falls as ~1/sqrt(fit_len) instead of being
+    pinned to the step size.
+
+    Returns (row, col) as floats, or None if the two arms are near-parallel
+    (no resolvable corner).
     """
-    pts = np.asarray(points, dtype=float)
-    center = pts.mean(axis=0)
-    X = pts - center
+    p = np.asarray(polyline, dtype=float).reshape(-1, 2)
+    k = int(kink_index)
+    left = p[max(0, k - fit_len):k]
+    right = p[k + 1:k + 1 + fit_len]
+    if len(left) < 3 or len(right) < 3:
+        return None
 
-    # PCA in 2D
-    _, _, vt = np.linalg.svd(X, full_matrices=False)
-    direction = vt[0]
-    direction = direction / np.linalg.norm(direction)
+    def fit(arm):
+        if np.ptp(arm[:, 0]) < 1e-9:
+            return None
+        a, b = np.polyfit(arm[:, 0], arm[:, 1], 1)
+        return float(a), float(b)
 
-    # avoid vertical sign ambiguity
-    if direction[0] < 0:
-        direction = -direction
+    fl, fr = fit(left), fit(right)
+    if fl is None or fr is None:
+        return None
+    a1, b1 = fl
+    a2, b2 = fr
+    if abs(a1 - a2) < min_slope_diff:
+        return None
 
-    # project onto direction
-    t = X @ direction
-    tmin, tmax = t.min(), t.max()
-    p1 = center + tmin * direction
-    p2 = center + tmax * direction
-
-    # slope/intercept
-    if abs(direction[0]) < 1e-9:
-        slope = np.inf
-        intercept = np.nan
-    else:
-        slope = direction[1] / direction[0]
-        intercept = center[1] - slope * center[0]
-
-    return {
-        "center": center,
-        "direction": direction,
-        "slope": slope,
-        "intercept": intercept,
-        "proj_min": tmin,
-        "proj_max": tmax,
-        "endpoints": np.vstack([p1, p2]),
-        "length": np.linalg.norm(p2 - p1),
-    }
+    row = (b2 - b1) / (a1 - a2)
+    col = a1 * row + b1
+    lo, hi = p[:, 0].min() - fit_len, p[:, 0].max() + fit_len
+    if not (lo <= row <= hi):
+        return None
+    return (row, col)
 
 
-def local_tangent_estimates(points, k=10):
+def vertex_candidates(
+    polylines: Sequence[np.ndarray],
+    break_points: Optional[Sequence[Tuple[int, int]]] = None,
+    window: int = 5,
+    min_jump: float = 0.30,
+    merge_radius: int = 3,
+    refine: bool = True,
+    fit_len: int = 8,
+) -> np.ndarray:
+    """All vertex candidates from kinks (+ optional lost_line break points)."""
+    cands: List[Tuple[float, float]] = []
+    for pl in polylines:
+        for k in find_kink_indices(pl, window=window, min_jump=min_jump):
+            if refine:
+                v = refine_vertex(pl, k, fit_len=fit_len)
+                if v is not None:
+                    cands.append(v)
+                    continue
+            p = np.asarray(pl, dtype=float).reshape(-1, 2)
+            cands.append((float(p[k, 0]), float(p[k, 1])))
+    if break_points is not None:
+        cands.extend(tuple(float(v) for v in bp) for bp in break_points)
+    if not cands:
+        return np.empty((0, 2), dtype=float)
+
+    pts = np.array(cands, dtype=float)
+    kept: List[np.ndarray] = []
+    for q in pts:
+        if all(np.hypot(*(q - k)) > merge_radius for k in kept):
+            kept.append(q)
+    return np.array(kept, dtype=float)
+
+
+def polyline_from_sweep_peaks(peaks: Sequence[Tuple[int, Optional[int]]]) -> np.ndarray:
     """
-    Estimate local tangent angle at each point using PCA of k-nearest neighbors.
-    Uses scipy.spatial.cKDTree (no sklearn dependency).
+    Convert a PeakDetector sweep's ``peaks`` list (``[(row, col_or_None), ...]``)
+    into a clean (K,2) polyline, dropping rows where no peak was found.
     """
-    pts = np.asarray(points, dtype=float)
-    k_eff = min(k, len(pts))
-    tree = cKDTree(pts)
-    _, idx = tree.query(pts, k=k_eff)
-    if idx.ndim == 1:          # k_eff == 1
-        idx = idx[:, np.newaxis]
-
-    tangents = []
-    for neigh_idx in idx:
-        neigh = pts[neigh_idx]
-        center = neigh.mean(axis=0)
-        X = neigh - center
-        _, _, vt = np.linalg.svd(X, full_matrices=False)
-        d = vt[0]
-        d = d / np.linalg.norm(d)
-        if d[0] < 0:
-            d = -d
-        tangents.append(d)
-
-    tangents = np.asarray(tangents)
-    angles = np.arctan2(tangents[:, 1], tangents[:, 0])
-    return tangents, angles
+    pts = [(r, c) for r, c in peaks if c is not None]
+    return np.asarray(pts, dtype=float).reshape(-1, 2)
 
 
-def build_negative_slope_graph(points, k=10, d_max=0.05, angle_tol_deg=20):
+def detect(
+    current_2d: np.ndarray,
+    candidates: Sequence[Tuple[int, int]],
+    max_gap: int = 12,
+    min_length: int = 2,
+    offset: int = 3,
+    min_contrast: float = 0.15,
+    require_positive_slope: bool = True,
+) -> List[InterdotSegment]:
+    """Find interdot segments by pairing vertex candidates.
+
+    Parameters
+    ----------
+    current_2d : np.ndarray
+        The 2-D charge-sensor grid (rows = Vy, cols = Vx) the candidates were
+        derived from — e.g. the cropped array a ``PeakDetector`` sweep ran on.
+    max_gap : int
+        Maximum pixel separation for two break points to be considered the
+        endpoints of one interdot transition.  Physically this is set by the
+        interdot coupling: a larger ``C_m`` widens the honeycomb vertex
+        splitting and lengthens the interdot segment.
+    offset : int
+        Perpendicular displacement, in pixels, of the two background reference
+        segments used for verification.
+    min_contrast : float
+        Acceptance threshold on |contrast|, in units of the standard deviation
+        of the reference segments.  Kept deliberately low: the pairing is
+        carried by geometry, and this test exists only to reject pairs that
+        span an empty charge region, not to detect the line.
     """
-    Connect nearby points whose local tangents are compatible and whose slope is negative.
-    Uses scipy.spatial.cKDTree (no sklearn dependency).
-    """
-    pts = np.asarray(points, dtype=float)
-    tangents, angles = local_tangent_estimates(pts, k=k)
+    pts = np.asarray(list(candidates), dtype=float).reshape(-1, 2)
+    if len(pts) < 2:
+        return []
 
-    tree = cKDTree(pts)
-    neigh_inds = tree.query_ball_point(pts, r=d_max)
-
-    angle_tol = np.deg2rad(angle_tol_deg)
-    graph = defaultdict(set)
-
-    for i, neigh in enumerate(neigh_inds):
-        # only keep points whose local tangent slope is negative
-        ti = tangents[i]
-        if ti[0] == 0:
-            continue
-        si = ti[1] / ti[0]
-        if si >= 0:
-            continue
-
-        for j in neigh:
-            if i == j:
+    segments: List[InterdotSegment] = []
+    for i, j in _mutual_nearest_pairs(pts, max_gap):
+        a = (int(round(pts[i][0])), int(round(pts[i][1])))
+        b = (int(round(pts[j][0])), int(round(pts[j][1])))
+        fa, fb = pts[i], pts[j]
+        if require_positive_slope:
+            dr = float(fb[0] - fa[0])
+            dc = float(fb[1] - fa[1])
+            # dV_P2/dV_P1 = drow/dcol must be > 0
+            if dc == 0 or (dr / dc) <= 0:
                 continue
 
-            tj = tangents[j]
-            if tj[0] == 0:
-                continue
-            sj = tj[1] / tj[0]
-            if sj >= 0:
-                continue
-
-            # angle compatibility (up to sign)
-            a = abs(angles[i] - angles[j])
-            a = min(a, np.pi - a, abs(np.pi - a))
-            if a < angle_tol:
-                graph[i].add(j)
-                graph[j].add(i)
-
-    return graph, tangents, angles
-
-
-def connected_components(graph, n_points):
-    visited = np.zeros(n_points, dtype=bool)
-    comps = []
-
-    for i in range(n_points):
-        if visited[i]:
+        line = _raster_line(a, b)
+        if len(line) < min_length:
             continue
-        if i not in graph:
+        line = _clip(line, current_2d.shape)
+        if len(line) < min_length:
             continue
 
-        q = deque([i])
-        visited[i] = True
-        comp = []
-
-        while q:
-            u = q.popleft()
-            comp.append(u)
-            for v in graph[u]:
-                if not visited[v]:
-                    visited[v] = True
-                    q.append(v)
-
-        comps.append(comp)
-
-    return comps
+        contrast = _verify(current_2d, a, b, line, offset)
+        segments.append(
+            InterdotSegment(
+                a=a, b=b, pixels=line,
+                contrast=contrast,
+                # ABSOLUTE deviation: an interdot transition shifts the sensor
+                # dot's Coulomb peak, so depending on the sensor's operating
+                # point the segment appears as a ridge OR a trough.  Requiring
+                # a positive-going ridge silently discards half of them.
+                accepted=bool(abs(contrast) >= min_contrast),
+            )
+        )
+    return segments
 
 
-def extract_negative_fragments(peaks, k=10, d_max=0.05, angle_tol_deg=20,
-                               min_points=6, min_length=0.08):
-    """
-    Returns fitted negative-slope fragments.
-    """
-    peaks = np.asarray(peaks, dtype=float)
-    graph, tangents, angles = build_negative_slope_graph(
-        peaks, k=k, d_max=d_max, angle_tol_deg=angle_tol_deg
-    )
-    comps = connected_components(graph, len(peaks))
-
-    fragments = []
-    for comp in comps:
-        if len(comp) < min_points:
-            continue
-        pts = peaks[comp]
-        line = fit_line_pca(pts)
-        slope = line["slope"]
-
-        if not np.isfinite(slope):
-            continue
-        if slope >= 0:
-            continue
-        if line["length"] < min_length:
-            continue
-
-        line["indices"] = comp
-        line["points"] = pts
-        fragments.append(line)
-
-    return fragments
+def accepted_pixels(segments: Sequence[InterdotSegment]) -> np.ndarray:
+    """All pixels belonging to accepted interdot segments."""
+    keep = [s.pixels for s in segments if s.accepted and len(s.pixels)]
+    return np.vstack(keep) if keep else np.empty((0, 2), dtype=int)
 
 
-def point_to_segment_distance(p, a, b):
-    ab = b - a
-    denom = np.dot(ab, ab)
-    if denom < 1e-12:
-        return np.linalg.norm(p - a)
-    t = np.dot(p - a, ab) / denom
-    t = np.clip(t, 0.0, 1.0)
-    proj = a + t * ab
-    return np.linalg.norm(p - proj)
+def estimated_vertices(segments: Sequence[InterdotSegment]) -> np.ndarray:
+    """Triple-point estimates: the endpoints of accepted segments."""
+    pts: List[Tuple[int, int]] = []
+    for s in segments:
+        if s.accepted:
+            pts.extend([s.a, s.b])
+    return np.array(pts, dtype=int) if pts else np.empty((0, 2), dtype=int)
 
 
-def scanned_support_along_segment(scanned, a, b, support_radius=0.03, n_samples=20):
-    """
-    Sample along candidate bridge and check if scanned cells exist nearby.
-    Returns 0.0 immediately if the scanned array is empty.
-    """
-    scanned = np.asarray(scanned, dtype=float)
-    if len(scanned) == 0:
-        return 0.0
-
-    ts = np.linspace(0, 1, n_samples)
-    samples = a[None, :] * (1 - ts[:, None]) + b[None, :] * ts[:, None]
-
-    tree = cKDTree(scanned)
-    count = 0
-    for s in samples:
-        dist, _ = tree.query(s, k=1)
-        if dist <= support_radius:
-            count += 1
-
-    return count / n_samples
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
 
 
-def endpoint_facing_score(endpoint, tangent, other_endpoint):
-    """
-    Higher if tangent direction roughly points toward the other endpoint.
-    """
-    v = other_endpoint - endpoint
-    nv = np.linalg.norm(v)
-    if nv < 1e-12:
-        return 0.0
-    v = v / nv
-    t1 = tangent / (np.linalg.norm(tangent) + 1e-12)
-    t2 = -t1
-    return max(np.dot(t1, v), np.dot(t2, v))
+def _mutual_nearest_pairs(pts: np.ndarray, max_gap: float) -> List[Tuple[int, int]]:
+    """Pair indices that are each other's nearest neighbour within max_gap."""
+    n = len(pts)
+    d = np.hypot(
+        pts[:, 0][:, None] - pts[:, 0][None, :],
+        pts[:, 1][:, None] - pts[:, 1][None, :],
+    ).astype(float)
+    np.fill_diagonal(d, np.inf)
+    nearest = np.argmin(d, axis=1)
 
-
-def _cluster_midpoints(candidates, eps=0.06):
-    """
-    Simple union-find clustering of bridge midpoints within eps distance.
-    Replaces sklearn DBSCAN to remove sklearn dependency.
-    """
-    n = len(candidates)
-    mids = np.array([(c["p1"] + c["p2"]) / 2.0 for c in candidates])
-
-    parent = list(range(n))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(x, y):
-        px, py = find(x), find(y)
-        if px != py:
-            parent[px] = py
-
-    tree = cKDTree(mids)
-    pairs = tree.query_pairs(r=eps)
-    for i, j in pairs:
-        union(i, j)
-
-    groups = defaultdict(list)
+    pairs: List[Tuple[int, int]] = []
     for i in range(n):
-        groups[find(i)].append(i)
+        j = int(nearest[i])
+        if i < j and int(nearest[j]) == i and d[i, j] <= max_gap:
+            pairs.append((i, j))
+    return pairs
 
-    return groups
+
+def _raster_line(a: Tuple[int, int], b: Tuple[int, int]) -> np.ndarray:
+    """Integer cells along the segment a->b (dense, no gaps)."""
+    n = int(max(abs(b[0] - a[0]), abs(b[1] - a[1]))) + 1
+    rows = np.round(np.linspace(a[0], b[0], n)).astype(int)
+    cols = np.round(np.linspace(a[1], b[1], n)).astype(int)
+    return np.unique(np.column_stack([rows, cols]), axis=0)
 
 
-def detect_interdot_bridges(peaks, scanned,
-                            d_max=0.05,
-                            angle_tol_deg=20,
-                            min_points=6,
-                            min_length=0.08,
-                            min_gap=0.03, max_gap=0.22,
-                            support_radius=0.03,
-                            min_support=0.5,
-                            positive_slope_min=0.1,
-                            positive_slope_max=5.0,
-                            max_vy_diff=0.3):
-    """
-    Main routine:
-      1) get negative fragments
-      2) collect endpoints
-      3) pair endpoints into interdot bridge candidates
-      4) greedy one-bridge-per-endpoint matching
-    """
-    fragments = extract_negative_fragments(
-        peaks,
-        d_max=d_max,
-        angle_tol_deg=angle_tol_deg,
-        min_points=min_points,
-        min_length=min_length,
+def _clip(cells: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+    ny, nx = shape
+    m = (
+        (cells[:, 0] >= 0) & (cells[:, 0] < ny)
+        & (cells[:, 1] >= 0) & (cells[:, 1] < nx)
     )
+    return cells[m]
 
-    # Prepare endpoint list
-    endpoints = []
-    for fi, frag in enumerate(fragments):
-        p1, p2 = frag["endpoints"]
-        t = frag["direction"]
 
-        endpoints.append({
-            "fragment_id": fi,
-            "point": p1,
-            "tangent": t,
-            "frag": frag,
-        })
-        endpoints.append({
-            "fragment_id": fi,
-            "point": p2,
-            "tangent": t,
-            "frag": frag,
-        })
+def _verify(
+    current_2d: np.ndarray,
+    a: Tuple[int, int],
+    b: Tuple[int, int],
+    line: np.ndarray,
+    offset: int,
+) -> float:
+    """Signal-to-background contrast of the candidate segment.
 
-    candidates = []
+    Returns (mean_on - mean_off) / std_off.  Positive and large means the
+    segment sits on a ridge of the sensor signal relative to the charge
+    regions immediately either side of it.
+    """
+    d = np.array([b[0] - a[0], b[1] - a[1]], dtype=float)
+    norm = np.hypot(*d)
+    if norm == 0:
+        return -np.inf
+    perp = np.array([-d[1], d[0]]) / norm   # unit normal
 
-    for i in range(len(endpoints)):
-        for j in range(i + 1, len(endpoints)):
-            e1 = endpoints[i]
-            e2 = endpoints[j]
+    on_vals = [float(current_2d[int(r), int(c)]) for r, c in line]
 
-            # must come from different fragments
-            if e1["fragment_id"] == e2["fragment_id"]:
-                continue
+    off_vals: List[float] = []
+    for sign in (+1, -1):
+        shifted = line + np.round(sign * offset * perp).astype(int)
+        shifted = _clip(shifted, current_2d.shape)
+        off_vals.extend(float(current_2d[int(r), int(c)]) for r, c in shifted)
 
-            a = e1["point"]
-            b = e2["point"]
-            gap = np.linalg.norm(b - a)
-
-            if gap < min_gap or gap > max_gap:
-                continue
-
-            # Both endpoints must be at a similar Vy level (same honeycomb vertex)
-            if abs(a[1] - b[1]) > max_vy_diff:
-                continue
-
-            dx = b[0] - a[0]
-            dy = b[1] - a[1]
-            if abs(dx) < 1e-9:
-                continue
-
-            bridge_slope = dy / dx
-            if bridge_slope < positive_slope_min or bridge_slope > positive_slope_max:
-                continue
-
-            support = scanned_support_along_segment(
-                scanned, a, b, support_radius=support_radius
-            )
-            if support < min_support:
-                continue
-
-            face1 = endpoint_facing_score(a, e1["tangent"], b)
-            face2 = endpoint_facing_score(b, e2["tangent"], a)
-
-            # penalty if bridge is too parallel to reservoir lines
-            s1 = e1["frag"]["slope"]
-            s2 = e2["frag"]["slope"]
-            slope_sep = abs(bridge_slope - 0.5 * (s1 + s2))
-
-            score = (
-                2.0 * support
-                + 1.0 * face1
-                + 1.0 * face2
-                + 0.3 * slope_sep
-                - 1.5 * gap
-            )
-
-            candidates.append({
-                "p1": a,
-                "p2": b,
-                "slope": bridge_slope,
-                "gap": gap,
-                "support": support,
-                "face1": face1,
-                "face2": face2,
-                "score": score,
-                "frag_ids": (e1["fragment_id"], e2["fragment_id"]),
-                "ep_idx": (i, j),
-            })
-
-    # merge near-duplicate bridges by clustering midpoints
-    if len(candidates) == 0:
-        return fragments, []
-
-    groups = _cluster_midpoints(candidates, eps=0.06)
-
-    merged = []
-    for indices in groups.values():
-        group = [candidates[k] for k in indices]
-        best = max(group, key=lambda x: x["score"])
-        merged.append(best)
-
-    merged = sorted(merged, key=lambda x: x["score"], reverse=True)
-
-    # Greedy one-bridge-per-endpoint: each fragment endpoint can only be
-    # used by one bridge.  Process candidates best-score-first.
-    used_endpoints: set = set()
-    final = []
-    for bridge in merged:
-        ei, ej = bridge["ep_idx"]
-        if ei not in used_endpoints and ej not in used_endpoints:
-            used_endpoints.add(ei)
-            used_endpoints.add(ej)
-            final.append(bridge)
-
-    return fragments, final
+    if not off_vals or not on_vals:
+        return -np.inf
+    sd = float(np.std(off_vals))
+    if sd < 1e-12:
+        sd = 1e-12
+    return (float(np.mean(on_vals)) - float(np.mean(off_vals))) / sd
