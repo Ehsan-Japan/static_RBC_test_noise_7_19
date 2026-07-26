@@ -3,12 +3,13 @@ DQDSimulator — runs a charge-sensing DQD simulation, optionally adds white
 noise, and saves all outputs.  Absorbs the old simulation.py + preprocessing.py.
 """
 import os
-import json
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, Optional
 
 from qarray import ChargeSensedDotArray, DotArray, NoNoise
+
+from ..config.axis_labels import x_label, y_label
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +87,10 @@ class DQDSimulator:
         vx_min, vx_max = vs["vx_min"], vs["vx_max"]
         vy_min, vy_max = vs["vy_min"], vs["vy_max"]
         nx, ny = vs["n_points_x"], vs["n_points_y"]
-        xlabel, ylabel = p["xlabel"], p["ylabel"]
+        # Axis labels come from the shared axis-label config so every figure
+        # in the pipeline agrees; params may still override them explicitly.
+        xlabel = p.get("xlabel") or x_label()
+        ylabel = p.get("ylabel") or y_label()
         dpi = po.get("dpi", 300)
 
         cs_save = po.get("charge_sensing_save_path", os.path.join(self.save_dir, "charge_sensing.jpg"))
@@ -102,11 +106,9 @@ class DQDSimulator:
         npy_z = os.path.join(os.path.dirname(cs_save), "charge_sensing_data.npy")
         npy_dz = os.path.join(os.path.dirname(cs_save), "charge_sensing_grad_data.npy")
         npy_noisy = os.path.join(os.path.dirname(cs_save), "charge_sensing_noisy_z_data.npy")
-        params_path = os.path.join(os.path.dirname(cs_save), "hyperparameters.json")
 
-        # Save hyperparameters
-        with open(params_path, "w") as f:
-            json.dump(p, f, indent=4)
+        # hyperparameters.json is written by DatasetPipeline (which knows the
+        # analysis hyperparameters too), not here.
 
         # Build model and sweep
         model = ChargeSensedDotArray(
@@ -180,7 +182,6 @@ class DQDSimulator:
         plt.close(fig)
 
         print(f"Charge sensing data saved: {npy_z}")
-        print(f"Hyperparameters saved: {params_path}")
 
     # ------------------------------------------------------------------
     # Double-dot stability diagram (from old preprocessing.py)
@@ -211,14 +212,17 @@ class DQDSimulator:
         n_open = np.nan_to_num(n_open, nan=0)
         z_open = _charge_state_changes(n_open)
 
+        # No colorbar: the plot is a binary charge-state-change map, so the
+        # colour scale carries no information worth a scale bar.
         _save_plot(
             data=z_open,
             extent=[x_min, x_max, y_min, y_max],
             title="Double dot stability diagram",
-            xlabel="P1 (mV)",
-            ylabel="P2 (mV)",
+            xlabel=x_label(),
+            ylabel=y_label(),
             save_path=os.path.join(out_dir, "double_dot_stability_diagram.jpg"),
             dpi=dpi,
+            show_colorbar=False,
         )
 
         # Build full-size double-dot array and save

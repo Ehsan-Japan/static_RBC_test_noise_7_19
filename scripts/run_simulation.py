@@ -11,8 +11,19 @@ def main():
         # ── Output ────────────────────────────────────────────────────
         base_save_dir="training_data",
 
+        # ── Axis labels ───────────────────────────────────────────────
+        # Names and units of the two gate axes.  Set here ONCE: every figure
+        # the pipeline produces (stability diagram, overlays, binary images,
+        # interdot plots) is labelled from these, so all images agree.
+        # Rendered as "<name> (<unit>)", e.g. "P1 (mV)"; set the unit to ""
+        # to print the bare name.
+        x_axis_name="P1",
+        y_axis_name="P2",
+        x_axis_unit="mV",
+        y_axis_unit="mV",
+
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=27,
+        n_samples=30,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,

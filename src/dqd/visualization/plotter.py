@@ -10,6 +10,8 @@ from scipy.signal import find_peaks
 import matplotlib.ticker as ticker
 from typing import Dict, Optional
 
+from ..config.axis_labels import x_label as _x_label, y_label as _y_label
+
 
 class Plotter:
     """
@@ -48,16 +50,16 @@ class Plotter:
         fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
 
         im0 = axes[0].imshow(z, extent=extent, origin="lower", aspect="auto", cmap="hot")
-        axes[0].set_xlabel("P1")
-        axes[0].set_ylabel("P2")
+        axes[0].set_xlabel(_x_label())
+        axes[0].set_ylabel(_y_label())
         axes[0].set_title("$z$")
         fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04).set_label(
             "Charge Sensor Output"
         )
 
         im1 = axes[1].imshow(dz, extent=extent, origin="lower", aspect="auto", cmap="hot")
-        axes[1].set_xlabel("P1")
-        axes[1].set_ylabel("P2")
+        axes[1].set_xlabel(_x_label())
+        axes[1].set_ylabel(_y_label())
         axes[1].set_title(r"$\frac{dz}{dVx} + \frac{dz}{dVy}$")
         fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04).set_label(
             "Gradient of Charge Sensor Output"
@@ -152,8 +154,8 @@ class Plotter:
     def plot_original_data(
         data_array: np.ndarray,
         save_dir: str,
-        x_label: str = "X (mV)",
-        y_label: str = "Y (mV)",
+        x_label: Optional[str] = None,
+        y_label: Optional[str] = None,
         cmap: str = "hot",
         prefix: str = "original",
     ) -> None:
@@ -161,8 +163,8 @@ class Plotter:
         plt.figure(figsize=(8, 6))
         sc = plt.scatter(X, Y, c=I, cmap=cmap)
         plt.colorbar(sc, label="Current (nA)")
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
+        plt.xlabel(x_label or _x_label())
+        plt.ylabel(y_label or _y_label())
         plt.xlim(X.min(), X.max())
         plt.ylim(Y.min(), Y.max())
         plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
@@ -172,8 +174,8 @@ class Plotter:
     def plot_rays_only(
         rays_data: np.ndarray,
         save_dir: str,
-        x_label: str = "X (mV)",
-        y_label: str = "Y (mV)",
+        x_label: Optional[str] = None,
+        y_label: Optional[str] = None,
         cmap: str = "hot",
         prefix: str = "rays_only",
     ) -> None:
@@ -182,8 +184,8 @@ class Plotter:
         sc = plt.scatter(Xr, Yr, c=Ir, cmap=cmap, s=30, edgecolor="black",
                          vmin=Ir.min(), vmax=Ir.max())
         plt.colorbar(sc, label="Current (nA)")
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
+        plt.xlabel(x_label or _x_label())
+        plt.ylabel(y_label or _y_label())
         plt.grid(True)
         plt.xlim(Xr.min(), Xr.max())
         plt.ylim(Yr.min(), Yr.max())
@@ -195,8 +197,8 @@ class Plotter:
         data_array: np.ndarray,
         rays_data: np.ndarray,
         save_dir: str,
-        x_label: str = "X (mV)",
-        y_label: str = "Y (mV)",
+        x_label: Optional[str] = None,
+        y_label: Optional[str] = None,
         cmap: str = "hot",
         prefix: str = "combined_plot",
     ) -> None:
@@ -209,8 +211,8 @@ class Plotter:
         plt.scatter(Xr, Yr, c=Ir, cmap=cmap, s=40, edgecolor="black",
                     marker="o", vmin=vmin, vmax=vmax)
         plt.colorbar(label="Current (nA)")
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
+        plt.xlabel(x_label or _x_label())
+        plt.ylabel(y_label or _y_label())
         plt.xlim(min(X.min(), Xr.min()), max(X.max(), Xr.max()))
         plt.ylim(min(Y.min(), Yr.min()), max(Y.max(), Yr.max()))
         plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
@@ -273,8 +275,8 @@ class Plotter:
         rays_dict: Dict,
         save_dir: str,
         prefix: str = "rays_with_peaks",
-        xlabel: str = "X (mV)",
-        ylabel: str = "Y (mV)",
+        xlabel: Optional[str] = None,
+        ylabel: Optional[str] = None,
         cmap: str = "hot",
         peak_marker_style: str = "x",
         peak_marker_size: int = 100,
@@ -285,8 +287,8 @@ class Plotter:
         plt.figure(figsize=(10, 8))
         sc = plt.scatter(X, Y, c=I, cmap=cmap, s=10, edgecolor="none", alpha=1)
         plt.colorbar(sc, label="Current (nA)")
-        plt.xlabel(f"{xlabel} (mV)", fontsize=14)
-        plt.ylabel(f"{ylabel} (mV)", fontsize=14)
+        plt.xlabel(xlabel or _x_label(), fontsize=14)
+        plt.ylabel(ylabel or _y_label(), fontsize=14)
         peaks_added = False
         for angle, ray in rays_dict.items():
             rx, ry, rc = ray["X"], ray["Y"], ray["Current"]

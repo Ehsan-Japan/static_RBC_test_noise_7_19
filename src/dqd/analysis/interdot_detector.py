@@ -26,6 +26,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Tuple
 
+from ..config.axis_labels import x_label, y_label
+
 
 class InterdotDetector:
     """
@@ -389,8 +391,8 @@ class InterdotDetector:
                        marker="x", linewidths=1.5,
                        label="Interdot Peaks", zorder=5)
 
-        ax.set_xlabel("Vx (V)")
-        ax.set_ylabel("Vy (V)")
+        ax.set_xlabel(x_label())
+        ax.set_ylabel(y_label())
         ax.set_xlim(vxmin, vxmax)
         ax.set_ylim(vymin, vymax)
         ax.set_aspect("equal")

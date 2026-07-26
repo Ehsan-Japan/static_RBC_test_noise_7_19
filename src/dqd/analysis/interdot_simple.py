@@ -26,6 +26,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import List, Tuple
 
+from ..config.axis_labels import x_label, y_label
+
 
 # ----------------------------------------------------------------------
 # Public entry point
@@ -409,8 +411,8 @@ def _plot(sample_dir, current_2d, peaks_v, break_pts, connections, interdot_v,
     ax.set_xlim(vx_min, vx_max)
     ax.set_ylim(vy_min, vy_max)
     ax.set_aspect("equal")
-    ax.set_xlabel("Vx (V)")
-    ax.set_ylabel("Vy (V)")
+    ax.set_xlabel(x_label())
+    ax.set_ylabel(y_label())
     ax.legend(loc="upper right")
     out = os.path.join(sample_dir, "summary_with_interdot.png")
     plt.savefig(out, dpi=300, bbox_inches="tight")

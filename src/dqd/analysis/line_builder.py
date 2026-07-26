@@ -40,6 +40,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..config.axis_labels import x_label, y_label
+
 Cell = Tuple[int, int]          # (row, col) on the voltage grid
 
 
@@ -528,8 +530,8 @@ def _base_axes(extent, title: str):
     ax.set_xlim(vx_min, vx_max)
     ax.set_ylim(vy_min, vy_max)
     ax.set_aspect("equal")
-    ax.set_xlabel("Vx (V)")
-    ax.set_ylabel("Vy (V)")
+    ax.set_xlabel(x_label())
+    ax.set_ylabel(y_label())
     ax.set_title(title)
     ax.grid(True, color="0.92", lw=0.5)
     ax.set_axisbelow(True)

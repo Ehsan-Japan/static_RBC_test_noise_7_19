@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from typing import Optional, Tuple, Dict
 
 from ..coordinates.coordinate_mapper import CoordinateMapper
+from ..config.axis_labels import x_label, y_label
 
 
 class CroppedRegion:
@@ -131,8 +132,8 @@ class CroppedRegion:
             ax.add_patch(rect)
 
         if not is_double_dot:
-            ax.set_xlabel("Vx (mV)")
-            ax.set_ylabel("Vy (mV)")
+            ax.set_xlabel(x_label())
+            ax.set_ylabel(y_label())
             plt.colorbar(im, label="Sensor Signal")
             out_png = os.path.join(self.output_dir, f"{base_name}_cropped.png")
             plt.savefig(out_png, dpi=300, bbox_inches="tight")

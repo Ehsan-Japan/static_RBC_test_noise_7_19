@@ -8,6 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..config.axis_labels import x_label, y_label
+
 
 class OverlayRenderer:
     """
@@ -125,8 +127,8 @@ class OverlayRenderer:
             ax.scatter(pk[:, 0], pk[:, 1], marker="x", color="red", s=50,
                        linewidths=1, label="Peaks")
 
-        ax.set_xlabel("Vx (mV)")
-        ax.set_ylabel("Vy (mV)")
+        ax.set_xlabel(x_label())
+        ax.set_ylabel(y_label())
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
         ax.legend(loc="upper right")
@@ -185,8 +187,8 @@ class OverlayRenderer:
             aspect="auto",
             cmap="hot",
         )
-        ax.set_xlabel("Vx (V)")
-        ax.set_ylabel("Vy (V)")
+        ax.set_xlabel(x_label())
+        ax.set_ylabel(y_label())
         ax.set_xlim(vxmin, vxmax)
         ax.set_ylim(vymin, vymax)
         ax.set_aspect("equal")
@@ -300,8 +302,8 @@ class OverlayRenderer:
             ax.scatter(pa[:, 0], pa[:, 1], marker="x", color="red",
                        s=40, label="All Detected Peaks")
 
-        ax.set_xlabel("Vx (mV)")
-        ax.set_ylabel("Vy (mV)")
+        ax.set_xlabel(x_label())
+        ax.set_ylabel(y_label())
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
         ax.legend(loc="upper right")
@@ -525,8 +527,8 @@ class OverlayRenderer:
             xs, ys = _to_centers(peaks)
             plt.scatter(xs, ys, color="red", s=50, marker="x", linewidths=1, label="Detected Transitions")
 
-        plt.xlabel("Vx (V)")
-        plt.ylabel("Vy (V)")
+        plt.xlabel(x_label())
+        plt.ylabel(y_label())
         plt.xlim(vxmin, vxmax)
         plt.ylim(vymin, vymax)
         plt.gca().set_aspect("equal")
@@ -684,8 +686,8 @@ class OverlayRenderer:
                        facecolors="orange", edgecolors="black", linewidths=1.2,
                        zorder=9, label="Break Points")
 
-        ax.set_xlabel("Vx (V)")
-        ax.set_ylabel("Vy (V)")
+        ax.set_xlabel(x_label())
+        ax.set_ylabel(y_label())
         ax.set_xlim(vxmin, vxmax)
         ax.set_ylim(vymin, vymax)
         ax.set_aspect("equal")

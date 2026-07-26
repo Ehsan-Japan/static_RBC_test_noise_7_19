@@ -9,6 +9,7 @@ import numpy as np
 from typing import Dict, List, Optional
 
 from ..config.capacitance_config import CapacitanceConfig
+from ..config.axis_labels import set_axis_labels, x_label, y_label
 from ..simulation.matrix_generator import CapacitanceMatrixGenerator
 from ..simulation.dqd_simulator import DQDSimulator
 from ..analysis.peak_detector import PeakDetector
@@ -46,6 +47,10 @@ class DatasetPipeline:
     fixed_matrices       : if provided, every sample uses this capacitance dict
                            instead of random generation (keys: Cdd, Cgd, Cds, Cgs)
     config               : optional CapacitanceConfig; uses defaults if None
+    x_axis_name          : name of the x (horizontal) gate axis on every plot
+    y_axis_name          : name of the y (vertical) gate axis on every plot
+    x_axis_unit          : unit shown after the x-axis name, e.g. "mV"
+    y_axis_unit          : unit shown after the y-axis name, e.g. "mV"
 
     Interdot break-point hyperparameters (see analysis/interdot_simple.py):
     interdot_neighbor_px      : peaks within this many grid pixels are treated
@@ -82,6 +87,11 @@ class DatasetPipeline:
         save_gifs: bool = True,
         fixed_matrices: Optional[Dict] = None,
         config: Optional[CapacitanceConfig] = None,
+        # ── Axis labels (shared by every figure) ──────────────────────
+        x_axis_name: str = "P1",
+        y_axis_name: str = "P2",
+        x_axis_unit: str = "mV",
+        y_axis_unit: str = "mV",
         # ── Evaluation hyperparameters ────────────────────────────────
         peak_neighbor_cols: int = 0,
         # ── Interdot break-point hyperparameters ──────────────────────
@@ -115,6 +125,15 @@ class DatasetPipeline:
         self.save_gifs = save_gifs
         self.fixed_matrices = fixed_matrices
         self.config = config or CapacitanceConfig()
+        # Publish the axis names / units so every figure in the pipeline —
+        # simulator, overlays, binariser, interdot plots — labels its axes
+        # the same way.
+        self.axis_labels = set_axis_labels(
+            x_name=x_axis_name,
+            y_name=y_axis_name,
+            x_unit=x_axis_unit,
+            y_unit=y_axis_unit,
+        )
         self.angles = np.linspace(0, 90, num_angles + 2)[1:-1]
         self.peak_neighbor_cols = peak_neighbor_cols
         self.interdot_neighbor_px = interdot_neighbor_px
@@ -166,9 +185,6 @@ class DatasetPipeline:
     def _run_sample(self, sample_idx: int, sample_dir: str) -> None:
         vs = self.voltage_sweep
 
-        # ---- 0. Record the hyperparameters used for this sample ----
-        self._write_hyperparameters(sample_dir)
-
         # ---- 1. Generate (or reuse fixed) capacitance matrices ----
         if self.fixed_matrices is not None:
             matrices = self.fixed_matrices
@@ -180,8 +196,8 @@ class DatasetPipeline:
             "save_dir": sample_dir,
             "capacitance": matrices,
             "model_params": {"coulomb_peak_width": self.coulomb_peak_width, "T": self.temperature},
-            "xlabel": "P1",
-            "ylabel": "P2",
+            "xlabel": x_label(),
+            "ylabel": y_label(),
             "voltage_sweep": vs,
             "optimal_Vg": [0.0, 0.0, 0.0],
             "noise_params": {"std": self.noise_std},
@@ -195,6 +211,11 @@ class DatasetPipeline:
                 "dpi": self.plot_dpi,
             },
         }
+
+        # ---- 2a. Record every hyperparameter used for this sample ----
+        # Written before the simulator runs so the record survives a crash.
+        self._write_hyperparameters(sample_dir, sim_params)
+
         DQDSimulator(sim_params).run()
 
         # npy files are now in sample_dir (before organize)
@@ -342,7 +363,7 @@ class DatasetPipeline:
     # Hyperparameter record
     # ------------------------------------------------------------------
 
-    def _write_hyperparameters(self, sample_dir: str) -> None:
+    def _write_hyperparameters(self, sample_dir: str, sim_params: Dict) -> None:
         """
         Write hyperparameters.json into the sample folder.
 
@@ -351,6 +372,11 @@ class DatasetPipeline:
         with a "meaning" string next to each, so a sample is self-describing
         even when it is copied out of its run folder.  JSON has no comment
         syntax, hence the {"value": …, "meaning": …} pairs.
+
+        The simulator parameters (voltage_sweep, capacitance, …) are kept at
+        the TOP level of the file exactly as DQDSimulator used to write them,
+        because line_builder, build_lines.py and rebuild_publication_figures.py
+        all read ``hyperparameters.json["voltage_sweep"]``.
         """
         hyperparams = {
             "crop_size": {
@@ -421,20 +447,51 @@ class DatasetPipeline:
                     "at all."
                 ),
             },
+            "x_axis_name": {
+                "value": self.axis_labels.x_name,
+                "folder_tag": None,
+                "meaning": (
+                    "Name of the x (horizontal) gate axis. Every figure in the "
+                    "pipeline is labelled with it, so all images agree."
+                ),
+            },
+            "y_axis_name": {
+                "value": self.axis_labels.y_name,
+                "folder_tag": None,
+                "meaning": "Name of the y (vertical) gate axis, on every figure.",
+            },
+            "x_axis_unit": {
+                "value": self.axis_labels.x_unit,
+                "folder_tag": None,
+                "meaning": (
+                    "Unit printed after the x-axis name, giving "
+                    f"\"{self.axis_labels.x_label}\". Empty string = no unit."
+                ),
+            },
+            "y_axis_unit": {
+                "value": self.axis_labels.y_unit,
+                "folder_tag": None,
+                "meaning": (
+                    "Unit printed after the y-axis name, giving "
+                    f"\"{self.axis_labels.y_label}\". Empty string = no unit."
+                ),
+            },
         }
-        payload = {
-            "_about": (
-                "Hyperparameters used to generate this sample. 'folder_tag' is "
-                "the abbreviation the same value appears under in the run "
-                "folder name (null = not part of the folder name). See "
-                "src/dqd/analysis/interdot_simple.py for the interdot_* "
-                "break-point method."
-            ),
-            "hyperparameters": hyperparams,
-        }
+        payload = dict(sim_params)          # voltage_sweep, capacitance, … as before
+        payload["_about"] = (
+            "Hyperparameters used to generate this sample. The top-level keys "
+            "are the simulator parameters; the 'hyperparameters' block "
+            "documents the analysis knobs, where 'folder_tag' is the "
+            "abbreviation the same value appears under in the run folder name "
+            "(null = not part of the folder name). See "
+            "src/dqd/analysis/interdot_simple.py for the interdot_* "
+            "break-point method."
+        )
+        payload["hyperparameters"] = hyperparams
         out_path = os.path.join(sample_dir, "hyperparameters.json")
         with open(out_path, "w") as f:
-            json.dump(payload, f, indent=4)
+            json.dump(payload, f, indent=4, default=str)
+        print(f"Hyperparameters saved: {out_path}")
 
     # ------------------------------------------------------------------
     # Per-peak processing

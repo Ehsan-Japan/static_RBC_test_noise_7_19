@@ -9,6 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Optional, Set, Tuple
 
+from ..config.axis_labels import x_label as _x_label, y_label as _y_label
+
 
 class ChargeSensorBinarizer:
     """
@@ -25,8 +27,8 @@ class ChargeSensorBinarizer:
         data_path: str,
         output_no_overlay: str,
         output_with_overlay: str,
-        xlabel: str = "Vx (V)",
-        ylabel: str = "Vy (V)",
+        xlabel: Optional[str] = None,
+        ylabel: Optional[str] = None,
         center_row: Optional[int] = None,
         center_col: Optional[int] = None,
         summary_path: Optional[str] = None,
@@ -53,6 +55,8 @@ class ChargeSensorBinarizer:
                                markers are placed using actual voltage values instead
                                of row/col indices from summary_path
         """
+        xlabel = xlabel or _x_label()
+        ylabel = ylabel or _y_label()
         try:
             data = np.load(data_path)
             Vx, Vy, Current = data.T

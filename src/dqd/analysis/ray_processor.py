@@ -78,23 +78,17 @@ class RayProcessor:
         Plotter.plot_original_data(
             data_array=real_data,
             save_dir=self.save_dir,
-            x_label=f"{barrier_x} (mV)",
-            y_label=f"{barrier_y} (mV)",
             prefix="original",
         )
         Plotter.plot_rays_only(
             rays_data=rays_data,
             save_dir=self.save_dir,
-            x_label=f"{barrier_x} (mV)",
-            y_label=f"{barrier_y} (mV)",
             prefix="rays_only",
         )
         Plotter.plot_combined(
             data_array=real_data,
             rays_data=rays_data,
             save_dir=self.save_dir,
-            x_label=f"{barrier_x} (mV)",
-            y_label=f"{barrier_y} (mV)",
             prefix="combined_plot",
         )
         Plotter.plot_current_vs_distance(
