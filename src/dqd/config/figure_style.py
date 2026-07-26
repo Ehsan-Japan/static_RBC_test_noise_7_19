@@ -34,6 +34,7 @@ Set the size ONCE at the start of the program — scripts/run_simulation.py
 passes figure_width_in / figure_height_in / plot_dpi to DatasetPipeline,
 which calls :func:`set_figure_style`.
 """
+import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -152,12 +153,92 @@ def apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax) -> None:
     ax.set_aspect("equal", adjustable="box")
 
 
+# ----------------------------------------------------------------------
+# Legend-free copies
+# ----------------------------------------------------------------------
+#
+# For the paper the legends are drawn by hand, so every sample-level figure
+# is ALSO saved without its legend into <sample>/figures_no_legend/.  The
+# normal figure keeps its legend and is untouched; only a second copy is made.
+#
+# DatasetPipeline sets the directory once per sample; None disables copying.
+_NO_LEGEND_DIR: Optional[str] = None
+
+NO_LEGEND_DIRNAME = "figures_no_legend"
+
+
+def set_no_legend_dir(path: Optional[str]) -> None:
+    """
+    Collect legend-free copies of sample-level figures in ``path``.
+
+    Pass None to switch the copies off.  Figures under ``cropped_results/``
+    (the per-peak crops) are skipped — there are hundreds per sample and they
+    are not paper figures.
+    """
+    global _NO_LEGEND_DIR
+    _NO_LEGEND_DIR = path
+
+
+def get_no_legend_dir() -> Optional[str]:
+    """Where legend-free copies are being written, or None."""
+    return _NO_LEGEND_DIR
+
+
+def _no_legend_path(path: str) -> Optional[str]:
+    """
+    Destination for the legend-free copy of ``path``, or None to skip it.
+
+    Only sample-level figures qualify: the sample root itself and one level
+    below it (images/), never the per-peak cropped_results tree.  Names from a
+    sub-directory are flattened ("images/noisy_z.jpg" -> "images__noisy_z.jpg")
+    so nothing collides in the single output folder.
+    """
+    if not _NO_LEGEND_DIR:
+        return None
+    sample_root = os.path.dirname(os.path.abspath(_NO_LEGEND_DIR))
+    try:
+        rel = os.path.relpath(os.path.abspath(path), sample_root)
+    except ValueError:                      # different drive on Windows
+        return None
+    parts = rel.split(os.sep)
+    if parts[0] in (os.pardir, "cropped_results", NO_LEGEND_DIRNAME):
+        return None
+    if len(parts) > 2:                      # deeper than <sample>/<dir>/file
+        return None
+    return os.path.join(_NO_LEGEND_DIR, "__".join(parts))
+
+
+def _strip_legends(fig) -> None:
+    """Remove every legend from the figure, in place."""
+    for ax in fig.axes:
+        leg = ax.get_legend()
+        if leg is not None:
+            leg.remove()
+    for leg in list(getattr(fig, "legends", [])):
+        leg.remove()
+
+
 def save_figure(fig, path: str, dpi: Optional[int] = None) -> None:
     """
     Save at the shared dpi, WITHOUT ``bbox_inches="tight"``.
 
     Cropping to the ink is exactly what made the old images different sizes;
     the fixed axes rectangle already leaves room for the labels.
+
+    Sample-level figures are saved a second time, legend removed, into the
+    directory given to :func:`set_no_legend_dir`.  The legend is stripped only
+    after the normal figure has been written, so the original is unaffected.
     """
-    fig.savefig(path, dpi=dpi or _ACTIVE.dpi)
+    dpi = dpi or _ACTIVE.dpi
+    fig.savefig(path, dpi=dpi)
+
+    copy_path = _no_legend_path(path)
+    if copy_path:
+        try:
+            os.makedirs(os.path.dirname(copy_path), exist_ok=True)
+            _strip_legends(fig)
+            fig.savefig(copy_path, dpi=dpi)
+        except Exception as exc:            # never let a copy break the run
+            print(f"[figure_style] no-legend copy failed for {path}: {exc}")
+
     plt.close(fig)

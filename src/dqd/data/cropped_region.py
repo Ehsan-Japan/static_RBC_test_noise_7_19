@@ -51,9 +51,15 @@ class CroppedRegion:
 
         Returns
         -------
-        (center_i, center_j) : 0-based row/col indices of the peak in the
-                               *original* (uncropped) voltage grid, or
-                               (None, None) if the crop window is empty.
+        (center_i, center_j, local_i, local_j)
+            center_i / center_j : 0-based row/col of the peak in the
+                *original* (uncropped) grid — used for full-grid overlays.
+            local_i / local_j   : the same peak's 0-based row/col INSIDE the
+                cropped array — used by the sweeps, which run on the cropped
+                data.  The two only coincide when the crop happens to start
+                at index 0; mixing them up puts the sweep on the wrong cell,
+                or out of bounds entirely.
+            All four are None if the crop window is empty.
         """
         array = np.load(file_path)
         Vx_flat, Vy_flat, z_flat = array[:, 0], array[:, 1], array[:, 2]
@@ -75,6 +81,7 @@ class CroppedRegion:
         original_extent = [Vx_values[0], Vx_values[-1], Vy_values[0], Vy_values[-1]]
 
         center_i, center_j = None, None
+        local_i, local_j = None, None
         cropped_array = None
 
         if crop_size > 0 and x_center is not None and y_center is not None:
@@ -103,10 +110,12 @@ class CroppedRegion:
                     cropped_Vx, cropped_Vy, self.output_dir, base_name
                 )
 
-                # Record center in *original* grid
-                j = int(np.argmin(np.abs(Vx_values - x_center)))
-                i = int(np.argmin(np.abs(Vy_values - y_center)))
-                center_i, center_j = i, j
+                # Record center in *original* grid …
+                center_j = int(np.argmin(np.abs(Vx_values - x_center)))
+                center_i = int(np.argmin(np.abs(Vy_values - y_center)))
+                # … and in the CROPPED grid, which is what the sweeps index.
+                local_j = int(np.argmin(np.abs(cropped_Vx - x_center)))
+                local_i = int(np.argmin(np.abs(cropped_Vy - y_center)))
 
         # ------ Plot ------
         fig, ax, cax = new_map_figure(with_colorbar=True)
@@ -144,8 +153,9 @@ class CroppedRegion:
         else:
             plt.close(fig)
 
-        print(f"Center indices: (i={center_i}, j={center_j})")
-        return center_i, center_j
+        print(f"Center indices: global (i={center_i}, j={center_j}), "
+              f"local (i={local_i}, j={local_j})")
+        return center_i, center_j, local_i, local_j
 
     # ------------------------------------------------------------------
     # Batch processing  (from old crop_image.process_data_with_hyperparameters)
@@ -170,9 +180,19 @@ class CroppedRegion:
             if not os.path.isfile(fp):
                 results[dataset] = {"cropped": None}
                 continue
-            ci, cj = self.crop_and_save(fp, x_center, y_center, crop_size)
+            ci, cj, li, lj = self.crop_and_save(fp, x_center, y_center, crop_size)
             results[dataset] = {
-                "cropped": ({"row_index": ci, "column_index": cj} if ci is not None else None)
+                "cropped": (
+                    {
+                        # indices in the full voltage grid
+                        "row_index": ci,
+                        "column_index": cj,
+                        # the same point inside the cropped array
+                        "local_row_index": li,
+                        "local_column_index": lj,
+                    }
+                    if ci is not None else None
+                )
             }
 
         # Save centre indices to JSON

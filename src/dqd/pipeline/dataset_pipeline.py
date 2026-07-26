@@ -10,7 +10,11 @@ from typing import Dict, List, Optional
 
 from ..config.capacitance_config import CapacitanceConfig
 from ..config.axis_labels import set_axis_labels, x_label, y_label
-from ..config.figure_style import set_figure_style
+from ..config.figure_style import (
+    NO_LEGEND_DIRNAME,
+    set_figure_style,
+    set_no_legend_dir,
+)
 from ..simulation.matrix_generator import CapacitanceMatrixGenerator
 from ..simulation.dqd_simulator import DQDSimulator
 from ..analysis.peak_detector import PeakDetector
@@ -197,6 +201,11 @@ class DatasetPipeline:
 
     def _run_sample(self, sample_idx: int, sample_dir: str) -> None:
         vs = self.voltage_sweep
+
+        # Every sample-level figure is also saved without its legend into
+        # <sample>/figures_no_legend/, ready for legends drawn by hand for
+        # the paper.  The normal figures keep theirs.
+        set_no_legend_dir(os.path.join(sample_dir, NO_LEGEND_DIRNAME))
 
         # ---- 1. Generate (or reuse fixed) capacitance matrices ----
         if self.fixed_matrices is not None:
@@ -573,12 +582,24 @@ class DatasetPipeline:
         center_info = results.get("charge_sensing_data.npy", {}).get("cropped") or {}
         center_i = center_info.get("row_index")
         center_j = center_info.get("column_index")
+        # The sweeps run on charge_sensing_cropped.npy, so they must be given
+        # the peak's position INSIDE the crop.  Using the full-grid index only
+        # works when the crop starts at index 0 (peaks at the lower-left edge);
+        # anywhere else it starts the sweep on the wrong cell, and once the
+        # index exceeds the crop it raises IndexError and the whole peak is
+        # lost — which is why smaller crop_size used to empty out peak folders.
+        local_i = center_info.get("local_row_index")
+        local_j = center_info.get("local_column_index")
 
         if center_i is None or center_j is None:
             print(f"  [WARN] No center indices for peak {peak_idx}; skipping sweep.")
             return
+        if local_i is None or local_j is None:      # older runs without them
+            local_i, local_j = center_i, center_j
 
-        center_row = center_i + 1  # convert to 1-based
+        # Binariser and the full-grid overlays work on the UNCROPPED data,
+        # so they keep the global index (1-based).
+        center_row = center_i + 1
         center_col = center_j + 1
 
         # Generate ground-truth array from the double-dot stability diagram.
@@ -598,17 +619,17 @@ class DatasetPipeline:
                 # --- negative-slope transitions (dot-to-lead lines) ---
                 {
                     "name": "bottom_up_right_left",
-                    "start_row": center_i,
+                    "start_row": local_i,
                     "row_step": +1,
-                    "start_col": center_j + self.col_buffer,
+                    "start_col": local_j + self.col_buffer,
                     "col_step": -1,
                     "col_buffer": self.col_buffer,
                 },
                 {
                     "name": "top_down_left_right",
-                    "start_row": center_i,
+                    "start_row": local_i,
                     "row_step": -1,
-                    "start_col": center_j - self.col_buffer,
+                    "start_col": local_j - self.col_buffer,
                     "col_step": +1,
                     "col_buffer": self.col_buffer,
                 },
@@ -630,9 +651,9 @@ class DatasetPipeline:
                 # Scanning left from center_j + 2*col_buffer hits the interdot peak first. ✓
                 {
                     "name": "interdot_bottom_up_right_to_left",
-                    "start_row": center_i + self.col_buffer,
+                    "start_row": local_i + self.col_buffer,
                     "row_step": +1,
-                    "start_col": center_j + 2 * self.col_buffer,
+                    "start_col": local_j + 2 * self.col_buffer,
                     "col_step": -1,
                     "col_buffer": self.col_buffer,
                 },
@@ -643,9 +664,9 @@ class DatasetPipeline:
                 # Scanning right from center_j - 2*col_buffer hits the interdot peak first. ✓
                 {
                     "name": "interdot_top_down_left_to_right",
-                    "start_row": center_i - self.col_buffer,
+                    "start_row": local_i - self.col_buffer,
                     "row_step": -1,
-                    "start_col": center_j - 2 * self.col_buffer,
+                    "start_col": local_j - 2 * self.col_buffer,
                     "col_step": +1,
                     "col_buffer": self.col_buffer,
                 },
@@ -653,8 +674,8 @@ class DatasetPipeline:
             "save_plots": True,
             "save_gifs": self.save_gifs,
             "save_txt": True,
-            "start_pixel_x": center_i,
-            "start_pixel_y": center_j,
+            "start_pixel_x": local_i,
+            "start_pixel_y": local_j,
             "global_pixel_x": global_pixel_x,
             "global_pixel_y": global_pixel_y,
         }

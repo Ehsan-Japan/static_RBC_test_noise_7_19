@@ -165,7 +165,13 @@ class PeakDetector:
     ) -> Tuple[List, List]:
         m, n = current_2d.shape
         states, peaks = [], []
-        current_start_col = start_col
+
+        # Clamp the start cell into the grid.  Sweep configs deliberately offset
+        # the start by col_buffer, which can land just outside a small crop; an
+        # unclamped start row indexes current_2d out of bounds and takes the
+        # whole peak down with it.
+        start_row = max(0, min(m - 1, start_row))
+        current_start_col = max(0, min(n - 1, start_col))
 
         for r in range(start_row, m if row_step > 0 else -1, row_step):
             current_start_col = max(0, min(n - 1, current_start_col))

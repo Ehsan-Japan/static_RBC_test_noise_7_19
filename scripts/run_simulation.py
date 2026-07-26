@@ -38,7 +38,7 @@ def main():
         figure_height_in=12.0,
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=45,
+        n_samples=70,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,
@@ -62,6 +62,11 @@ def main():
 
         # ── Output options ────────────────────────────────────────────
         plot_dpi=300,
+        # GIF ON/OFF.  True writes one animated sweep GIF per sweep per peak
+        # (peak_sweep_<name>.gif inside every cropped_results/ray_*/peak_*
+        # folder) showing the row-by-row scan.  Useful for debugging a sweep,
+        # slow and bulky for a full dataset — needs the ImageMagick writer, and
+        # just warns and skips if it is missing.
         save_gifs=False,
 
         # ── Evaluation ────────────────────────────────────────────────

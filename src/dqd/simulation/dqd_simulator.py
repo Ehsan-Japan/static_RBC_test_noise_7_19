@@ -177,6 +177,7 @@ class DQDSimulator:
         axes[0].set_aspect("equal", adjustable="box")
         fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
+
         im1 = axes[1].imshow(dz, extent=[vx_min, vx_max, vy_min, vy_max],
                              origin="lower", aspect="auto", cmap="hot")
         axes[1].set_xlabel(xlabel)
