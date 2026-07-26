@@ -9,7 +9,12 @@ import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..config.figure_style import (
+    LABEL_PEAK,
+    LABEL_SCANNED,
+    MARKER_PEAK,
+    MARKER_SCANNED,
     apply_voltage_axes,
+    draw_ground_truth_map,
     new_map_figure,
     save_figure,
 )
@@ -505,15 +510,14 @@ class OverlayRenderer:
             return xs, ys
 
         fig, ax, _ = new_map_figure()
-        ax.pcolormesh(x_edges, y_edges, data, cmap="gray_r",
-                      edgecolors="k", linewidth=0.5)
+        draw_ground_truth_map(ax, x_edges, y_edges, data)
 
         if scanned:
             xs, ys = _to_centers(scanned)
-            ax.scatter(xs, ys, color="blue", s=10, alpha=0.5, label="Measured Points")
+            ax.scatter(xs, ys, label=LABEL_SCANNED, **MARKER_SCANNED)
         if peaks:
             xs, ys = _to_centers(peaks)
-            ax.scatter(xs, ys, color="red", s=50, marker="x", linewidths=1, label="Detected Transitions")
+            ax.scatter(xs, ys, label=LABEL_PEAK, **MARKER_PEAK)
 
         apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax)
         ax.legend()
@@ -601,13 +605,12 @@ class OverlayRenderer:
             return xs, ys
 
         fig, ax, _ = new_map_figure()
-        ax.pcolormesh(x_edges, y_edges, data, cmap="gray_r",
-                      edgecolors="k", linewidth=0.5)
+        draw_ground_truth_map(ax, x_edges, y_edges, data)
 
         # ---- Sweeping results ----
         if show_measured_points and scanned:
             xs, ys = _to_centers(scanned)
-            ax.scatter(xs, ys, color="blue", s=10, alpha=0.5, label="Measured Points")
+            ax.scatter(xs, ys, label=LABEL_SCANNED, **MARKER_SCANNED)
         if peaks:
             xs, ys = _to_centers(peaks)
             ax.scatter(xs, ys, color="red", s=50, marker="x",

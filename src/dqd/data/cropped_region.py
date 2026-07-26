@@ -12,6 +12,7 @@ from typing import Optional, Tuple, Dict
 from ..coordinates.coordinate_mapper import CoordinateMapper
 from ..config.figure_style import (
     apply_voltage_axes,
+    draw_cell_grid,
     new_map_figure,
     save_figure,
 )
@@ -135,6 +136,13 @@ class CroppedRegion:
 
         im = ax.imshow(z_plot, extent=extent_plot, origin="lower", aspect="auto",
                        cmap=cmap, vmin=vmin, vmax=vmax)
+        # Same cell grid as the ground-truth figures, so the cropped view
+        # shows the voltage grid the sweeps actually step over.
+        draw_cell_grid(
+            ax,
+            np.linspace(extent_plot[0], extent_plot[1], z_plot.shape[1] + 1),
+            np.linspace(extent_plot[2], extent_plot[3], z_plot.shape[0] + 1),
+        )
 
         if x_center is not None and y_center is not None and crop_size > 0:
             rect = plt.Rectangle(

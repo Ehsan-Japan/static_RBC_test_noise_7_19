@@ -64,6 +64,50 @@ AXES_RECT = (0.100, 0.100, 0.750, 0.750)
 CBAR_RECT = (0.870, 0.100, 0.025, 0.750)
 
 
+# ----------------------------------------------------------------------
+# The one house style, taken from summary.png
+# ----------------------------------------------------------------------
+#
+# Every figure that draws the binary transition map (the double-dot stability
+# diagram, the per-peak binary_*.png, summary_total.png, summary.png) uses
+# these, so they are all the same picture in the same clothes: white
+# background, black transition cells, a visible black cell grid.
+#
+# Sensor-signal figures keep the "hot" colormap — they show a continuous
+# measurement, not a binary map — but they draw the SAME cell grid and use the
+# SAME marker styles, so the family still reads as one set.
+GT_CMAP = "gray_r"                 # 0 -> white, 1 -> black
+GT_EDGECOLOR = "k"
+GT_LINEWIDTH = 0.5
+
+# Overlay markers, identical everywhere.
+MARKER_SCANNED = dict(color="blue", s=10, alpha=0.5)
+MARKER_PEAK = dict(marker="x", color="red", s=50, linewidths=1)
+MARKER_CENTRE = dict(color="lime", marker="*", s=200, edgecolors="black")
+
+LABEL_SCANNED = "Measured Points"
+LABEL_PEAK = "Detected Transitions"
+
+
+def draw_ground_truth_map(ax, x_edges, y_edges, binary) -> None:
+    """Draw a binary transition map in the shared house style."""
+    ax.pcolormesh(x_edges, y_edges, binary, cmap=GT_CMAP,
+                  edgecolors=GT_EDGECOLOR, linewidth=GT_LINEWIDTH,
+                  vmin=0, vmax=1)
+
+
+def draw_cell_grid(ax, x_edges, y_edges) -> None:
+    """
+    Overlay the voltage-grid cell boundaries on a figure that is NOT a
+    pcolormesh — e.g. a "hot" sensor heatmap drawn with imshow — so it shows
+    the same cells as the ground-truth figures.
+    """
+    ax.vlines(x_edges, y_edges[0], y_edges[-1],
+              colors=GT_EDGECOLOR, linewidth=GT_LINEWIDTH)
+    ax.hlines(y_edges, x_edges[0], x_edges[-1],
+              colors=GT_EDGECOLOR, linewidth=GT_LINEWIDTH)
+
+
 @dataclass
 class FigureStyle:
     """Canvas geometry shared by every saved figure."""

@@ -38,7 +38,7 @@ def main():
         figure_height_in=12.0,
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=92,
+        n_samples=102,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,

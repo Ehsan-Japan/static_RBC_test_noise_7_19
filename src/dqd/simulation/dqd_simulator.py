@@ -12,6 +12,7 @@ from qarray import ChargeSensedDotArray, DotArray, NoNoise
 from ..config.axis_labels import x_label, y_label
 from ..config.figure_style import (
     apply_voltage_axes,
+    draw_ground_truth_map,
     figure_size,
     new_map_figure,
     save_figure,
@@ -35,20 +36,6 @@ def _charge_state_changes(n: np.ndarray) -> np.ndarray:
     change_x = np.logical_not(np.isclose(n[1:, :-1, :], n[:-1, :-1, :], atol=1e-3)).any(axis=-1)
     change_y = np.logical_not(np.isclose(n[:-1, 1:, :], n[:-1, :-1, :], atol=1e-3)).any(axis=-1)
     return np.logical_or(change_x, change_y)
-
-
-def _save_plot(data, extent, title, xlabel, ylabel, save_path, dpi,
-               show_colorbar=True, cmap="hot", vmin=None, vmax=None):
-    fig, ax, cax = new_map_figure(with_colorbar=show_colorbar)
-    im = ax.imshow(data, extent=extent, origin="lower", aspect="auto",
-                   cmap=cmap, vmin=vmin, vmax=vmax)
-    apply_voltage_axes(ax, extent[0], extent[1], extent[2], extent[3])
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    if show_colorbar:
-        fig.colorbar(im, cax=cax)
-    save_figure(fig, save_path, dpi=dpi)
 
 
 # ---------------------------------------------------------------------------
@@ -221,33 +208,27 @@ class DQDSimulator:
         n_open = np.nan_to_num(n_open, nan=0)
         z_open = _charge_state_changes(n_open)
 
-        # No colorbar: the plot is a binary charge-state-change map, so the
-        # colour scale carries no information worth a scale bar.
-        #
-        # cmap="binary" (black transitions on white) is the same convention as
-        # the per-peak binary_*.png images and summary_total.png, which all draw
-        # this identical ground-truth map.  They used to disagree only in
-        # colour, which made them read as different data.
-        _save_plot(
-            data=z_open,
-            extent=[x_min, x_max, y_min, y_max],
-            title="Double dot stability diagram",
-            xlabel=x_label(),
-            ylabel=y_label(),
-            save_path=os.path.join(out_dir, "double_dot_stability_diagram.jpg"),
-            dpi=dpi,
-            show_colorbar=False,
-            cmap="binary",
-            vmin=0,
-            vmax=1,
-        )
-
-        # Build full-size double-dot array and save
+        # Build the full-size double-dot array first: it is the array everything
+        # else calls "ground truth" (double_dot_data.npy -> ground_truth_labels
+        # .npy -> summary.png, summary_total.png, the per-peak binary_*.png), so
+        # the stability diagram must plot exactly it, not the unpadded z_open.
         x = np.linspace(x_min, x_max, x_res)
         y = np.linspace(y_min, y_max, y_res)
         xv, yv = np.meshgrid(x, y)
         z_full = np.zeros((y_res, x_res))
         z_full[:-1, :-1] = z_open
+
+        # House style, identical to summary.png: white background, black
+        # transition cells, visible cell grid.  No colorbar — the map is binary.
+        x_edges = np.linspace(x_min, x_max, x_res + 1)
+        y_edges = np.linspace(y_min, y_max, y_res + 1)
+        fig, ax, _ = new_map_figure()
+        draw_ground_truth_map(ax, x_edges, y_edges, z_full)
+        apply_voltage_axes(ax, x_min, x_max, y_min, y_max)
+        ax.set_title("Double dot stability diagram")
+        save_figure(fig, os.path.join(out_dir, "double_dot_stability_diagram.jpg"),
+                    dpi=dpi)
+
         dd_array = np.stack((xv.flatten(), yv.flatten(), z_full.flatten().astype(int)), axis=-1)
         np.save(os.path.join(out_dir, "double_dot_data.npy"), dd_array)
         print(f"Double dot data saved: {os.path.join(out_dir, 'double_dot_data.npy')}")

@@ -11,7 +11,13 @@ from typing import Optional, Set, Tuple
 
 from ..config.axis_labels import x_label as _x_label, y_label as _y_label
 from ..config.figure_style import (
+    LABEL_PEAK,
+    LABEL_SCANNED,
+    MARKER_CENTRE,
+    MARKER_PEAK,
+    MARKER_SCANNED,
     apply_voltage_axes,
+    draw_ground_truth_map,
     new_map_figure,
     save_figure,
 )
@@ -154,8 +160,7 @@ class ChargeSensorBinarizer:
                          ax_xmin, ax_xmax, ax_ymin, ax_ymax, out_path,
                          title="Local Maxima"):
         fig, ax, _ = new_map_figure()
-        ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
-                      edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
+        draw_ground_truth_map(ax, x_edges, y_edges, binary)
         apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -188,23 +193,17 @@ class ChargeSensorBinarizer:
         sx, sy = to_voltage(scanned_pts)
         dx, dy = to_voltage(detected_pts)
 
-        max_dim = max(num_cols, num_rows)
-        s_scan = 200 / max_dim
-        s_peak = 400 / max_dim
-
         fig, ax, _ = new_map_figure()
-        ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
-                      edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
+        draw_ground_truth_map(ax, x_edges, y_edges, binary)
 
         if sx:
-            ax.scatter(sx, sy, color="blue", s=s_scan, marker="s", alpha=0.5, label="Measured Cells")
+            ax.scatter(sx, sy, label=LABEL_SCANNED, **MARKER_SCANNED)
         if dx:
-            ax.scatter(dx, dy, color="red", s=s_peak, edgecolors="black",
-                       linewidths=0.8, marker="o", label="Detected Peaks")
+            ax.scatter(dx, dy, label=LABEL_PEAK, **MARKER_PEAK)
         if center_row and center_col:
             cx = vxmin + (center_col - 0.5) * cell_w
             cy = vymin + (center_row - 0.5) * cell_h
-            ax.scatter(cx, cy, color="lime", s=s_peak * 1.5, marker="*", edgecolors="black")
+            ax.scatter(cx, cy, label="Peak Centre", **MARKER_CENTRE)
 
         apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xticks(np.linspace(ax_xmin, ax_xmax, 5))
@@ -228,31 +227,23 @@ class ChargeSensorBinarizer:
         scanned_v, peaks_v, center_row, center_col, out_path,
         title="Local Maxima",
     ):
-        max_dim = max(num_cols, num_rows)
-        s_scan = 200 / max_dim
-        s_peak = 400 / max_dim
-
         fig, ax, _ = new_map_figure()
-        ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
-                      edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
+        draw_ground_truth_map(ax, x_edges, y_edges, binary)
 
         if scanned_v:
             sx = [v[0] for v in scanned_v]
             sy = [v[1] for v in scanned_v]
-            ax.scatter(sx, sy, color="blue", s=s_scan, marker="s", alpha=0.5,
-                       label="Measured Cells")
+            ax.scatter(sx, sy, label=LABEL_SCANNED, **MARKER_SCANNED)
         if peaks_v:
             dx = [v[0] for v in peaks_v]
             dy = [v[1] for v in peaks_v]
-            ax.scatter(dx, dy, color="red", s=s_peak, edgecolors="black",
-                       linewidths=0.8, marker="o", label="Detected Peaks")
+            ax.scatter(dx, dy, label=LABEL_PEAK, **MARKER_PEAK)
         if center_row and center_col:
             cell_w = (vxmax - vxmin) / num_cols
             cell_h = (vymax - vymin) / num_rows
             cx = vxmin + (center_col - 0.5) * cell_w
             cy = vymin + (center_row - 0.5) * cell_h
-            ax.scatter(cx, cy, color="lime", s=s_peak * 1.5, marker="*",
-                       edgecolors="black", label="Peak Centre")
+            ax.scatter(cx, cy, label="Peak Centre", **MARKER_CENTRE)
 
         apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xticks(np.linspace(ax_xmin, ax_xmax, 5))
