@@ -166,6 +166,9 @@ class DatasetPipeline:
     def _run_sample(self, sample_idx: int, sample_dir: str) -> None:
         vs = self.voltage_sweep
 
+        # ---- 0. Record the hyperparameters used for this sample ----
+        self._write_hyperparameters(sample_dir)
+
         # ---- 1. Generate (or reuse fixed) capacitance matrices ----
         if self.fixed_matrices is not None:
             matrices = self.fixed_matrices
@@ -334,6 +337,104 @@ class DatasetPipeline:
             print(f"  [WARN] Evaluation failed: {exc}")
             traceback.print_exc()
 
+
+    # ------------------------------------------------------------------
+    # Hyperparameter record
+    # ------------------------------------------------------------------
+
+    def _write_hyperparameters(self, sample_dir: str) -> None:
+        """
+        Write hyperparameters.json into the sample folder.
+
+        The run-folder name only carries the short tags (_nb_, _cx_, _sl_, …);
+        this file spells the same values out under their full parameter names
+        with a "meaning" string next to each, so a sample is self-describing
+        even when it is copied out of its run folder.  JSON has no comment
+        syntax, hence the {"value": …, "meaning": …} pairs.
+        """
+        hyperparams = {
+            "crop_size": {
+                "value": self.crop_size,
+                "folder_tag": None,
+                "meaning": (
+                    "Half-width (in mV) of the cropping window taken around "
+                    "each detected peak before the directional sweeps run."
+                ),
+            },
+            "interdot_neighbor_px": {
+                "value": self.interdot_neighbor_px,
+                "folder_tag": "nb",
+                "meaning": (
+                    "Two sweep peaks within this many grid pixels are grouped "
+                    "into the same dot-to-lead line. Smaller keeps "
+                    "nearly-touching lines separate (more break-point pairs "
+                    "survive the 'must be different lines' rule); larger "
+                    "merges thick or broken bands into one line."
+                ),
+            },
+            "interdot_connect_px": {
+                "value": self.interdot_connect_px,
+                "folder_tag": "cx",
+                "meaning": (
+                    "Maximum gap, in grid pixels, allowed between the break "
+                    "points of two different lines for them to be connected. "
+                    "The interdot transition is searched along that segment."
+                ),
+            },
+            "interdot_min_slope_change": {
+                "value": self.interdot_min_slope_change,
+                "folder_tag": "sl",
+                "meaning": (
+                    "Main sensitivity knob. A line only yields a break point "
+                    "if its local slope changes by more than this "
+                    "(grid-pixel slope units). Shallow honeycomb vertices "
+                    "change the slope by only ~0.3-0.6 and are silently "
+                    "rejected at 0.8 — the usual reason break points go "
+                    "undetected."
+                ),
+            },
+            "interdot_kink_window_frac": {
+                "value": self.interdot_kink_window_frac,
+                "folder_tag": "wf",
+                "meaning": (
+                    "Slope-comparison half-window, as a fraction of the line "
+                    "length. The slope before and after each interior point is "
+                    "measured over this window. Larger = more smoothing = "
+                    "kinks on long lines get straightened away."
+                ),
+            },
+            "interdot_kink_window_max": {
+                "value": self.interdot_kink_window_max,
+                "folder_tag": "wm",
+                "meaning": (
+                    "Hard cap on that half-window, in pixels (0 = uncapped). "
+                    "Capping it keeps long lines as kink-sensitive as short "
+                    "ones."
+                ),
+            },
+            "interdot_min_line_pts": {
+                "value": self.interdot_min_line_pts,
+                "folder_tag": "mlp",
+                "meaning": (
+                    "A group needs at least this many points, and this many "
+                    "distinct steps along its long axis, to count as a line "
+                    "at all."
+                ),
+            },
+        }
+        payload = {
+            "_about": (
+                "Hyperparameters used to generate this sample. 'folder_tag' is "
+                "the abbreviation the same value appears under in the run "
+                "folder name (null = not part of the folder name). See "
+                "src/dqd/analysis/interdot_simple.py for the interdot_* "
+                "break-point method."
+            ),
+            "hyperparameters": hyperparams,
+        }
+        out_path = os.path.join(sample_dir, "hyperparameters.json")
+        with open(out_path, "w") as f:
+            json.dump(payload, f, indent=4)
 
     # ------------------------------------------------------------------
     # Per-peak processing

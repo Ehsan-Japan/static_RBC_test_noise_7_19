@@ -12,7 +12,7 @@ def main():
         base_save_dir="training_data",
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=45,
+        n_samples=27,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,
@@ -26,7 +26,7 @@ def main():
         vy_max=1.0,
 
         # ── Peak processing ───────────────────────────────────────────
-        crop_size=2.0,
+        crop_size=0.5,
         col_buffer=2,
 
         # ── Simulator physics ─────────────────────────────────────────
