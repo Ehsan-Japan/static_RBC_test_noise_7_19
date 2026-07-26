@@ -37,9 +37,11 @@ def _charge_state_changes(n: np.ndarray) -> np.ndarray:
     return np.logical_or(change_x, change_y)
 
 
-def _save_plot(data, extent, title, xlabel, ylabel, save_path, dpi, show_colorbar=True):
+def _save_plot(data, extent, title, xlabel, ylabel, save_path, dpi,
+               show_colorbar=True, cmap="hot", vmin=None, vmax=None):
     fig, ax, cax = new_map_figure(with_colorbar=show_colorbar)
-    im = ax.imshow(data, extent=extent, origin="lower", aspect="auto", cmap="hot")
+    im = ax.imshow(data, extent=extent, origin="lower", aspect="auto",
+                   cmap=cmap, vmin=vmin, vmax=vmax)
     apply_voltage_axes(ax, extent[0], extent[1], extent[2], extent[3])
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -221,6 +223,11 @@ class DQDSimulator:
 
         # No colorbar: the plot is a binary charge-state-change map, so the
         # colour scale carries no information worth a scale bar.
+        #
+        # cmap="binary" (black transitions on white) is the same convention as
+        # the per-peak binary_*.png images and summary_total.png, which all draw
+        # this identical ground-truth map.  They used to disagree only in
+        # colour, which made them read as different data.
         _save_plot(
             data=z_open,
             extent=[x_min, x_max, y_min, y_max],
@@ -230,6 +237,9 @@ class DQDSimulator:
             save_path=os.path.join(out_dir, "double_dot_stability_diagram.jpg"),
             dpi=dpi,
             show_colorbar=False,
+            cmap="binary",
+            vmin=0,
+            vmax=1,
         )
 
         # Build full-size double-dot array and save

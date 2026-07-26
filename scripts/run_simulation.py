@@ -38,7 +38,7 @@ def main():
         figure_height_in=12.0,
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=70,
+        n_samples=92,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,
@@ -65,9 +65,15 @@ def main():
         # GIF ON/OFF.  True writes one animated sweep GIF per sweep per peak
         # (peak_sweep_<name>.gif inside every cropped_results/ray_*/peak_*
         # folder) showing the row-by-row scan.  Useful for debugging a sweep,
-        # slow and bulky for a full dataset — needs the ImageMagick writer, and
-        # just warns and skips if it is missing.
-        save_gifs=False,
+        # slow and bulky for a full dataset.  Uses ImageMagick when installed,
+        # otherwise Pillow, which ships with matplotlib.
+        save_gifs=True,
+        # GIF resolution — the single biggest cost of a run when save_gifs=True,
+        # because every frame is re-rendered from scratch.  Measured on a
+        # 25-row sweep: 150 dpi = 5.8 s and 2.4 MB per GIF, 100 dpi = 4.7 s and
+        # 0.75 MB, 75 dpi = 3.9 s.  Four sweeps per peak, so ~23 s per peak at
+        # 150 dpi.  Drop to 100 if the GIFs are only for eyeballing the sweep.
+        gif_dpi=150,
 
         # ── Evaluation ────────────────────────────────────────────────
         peak_neighbor_cols=2,

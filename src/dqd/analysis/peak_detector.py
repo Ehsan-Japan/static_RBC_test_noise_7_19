@@ -11,6 +11,27 @@ import matplotlib.animation as animation
 from typing import Dict, List, Optional, Tuple
 
 
+_GIF_WRITER: Optional[str] = None
+
+
+def _gif_writer() -> str:
+    """
+    Writer used for the sweep GIFs, decided once per process.
+
+    ImageMagick is preferred when installed; otherwise Pillow, which ships
+    with matplotlib and produces the same GIF.  Resolving it once keeps
+    matplotlib from printing "MovieWriter imagemagick unavailable; using
+    Pillow instead." for every single GIF of the run.
+    """
+    global _GIF_WRITER
+    if _GIF_WRITER is None:
+        _GIF_WRITER = ("imagemagick"
+                       if animation.writers.is_available("imagemagick")
+                       else "pillow")
+        print(f"[PeakDetector] GIF writer: {_GIF_WRITER}")
+    return _GIF_WRITER
+
+
 class PeakDetector:
     """
     Detects peaks in a 2-D charge-sensor array by scanning rows in a
@@ -25,6 +46,10 @@ class PeakDetector:
     col_buffer    : column offset applied between consecutive rows
     scanned_voltages : list of (vx, vy) pairs already scanned (termination check)
     threshold     : distance threshold for early termination in voltage space
+    gif_dpi       : resolution of the sweep GIFs.  Every frame is rendered
+                    from scratch, so this is the main cost driver: 150 dpi
+                    is ~230 ms/frame and ~2.4 MB per GIF, 100 dpi is
+                    ~190 ms/frame and ~0.75 MB.
     """
 
     def __init__(
@@ -36,6 +61,7 @@ class PeakDetector:
         col_buffer: int = 3,
         scanned_voltages: Optional[List[Tuple[float, float]]] = None,
         threshold: float = 0.05,
+        gif_dpi: int = 150,
     ):
         self.output_dir = output_dir
         self.save_plots = save_plots
@@ -44,6 +70,7 @@ class PeakDetector:
         self.col_buffer = col_buffer
         self.scanned_voltages = scanned_voltages or []
         self.threshold = threshold
+        self.gif_dpi = gif_dpi
 
     # ------------------------------------------------------------------
     # Public API
@@ -116,7 +143,8 @@ class PeakDetector:
             if hyperparams.get("save_gifs", self.save_gifs):
                 gif_path = os.path.join(self.output_dir, f"peak_sweep_{name}.gif")
                 try:
-                    self._animate(current_2d, states, gif_path)
+                    self._animate(current_2d, states, gif_path,
+                                  dpi=hyperparams.get("gif_dpi", self.gif_dpi))
                     sr["outputs"]["animation"] = gif_path
                 except Exception as e:
                     print(f"Warning: GIF animation failed for {name} ({e}). Skipping.")
@@ -352,17 +380,30 @@ class PeakDetector:
     # GIF animation
     # ------------------------------------------------------------------
 
-    def _animate(self, current_2d, states, out_path):
-        fig, ax = plt.subplots(figsize=(6, 6))
-        cax = ax.imshow(current_2d, cmap="hot", origin="lower", aspect="auto")
-        fig.colorbar(cax, ax=ax, shrink=0.7)
+    # Roughly how many tick labels to show per axis in the sweep animation.
+    # One tick per cell (the old behaviour) overlaps into an unreadable smear
+    # as soon as the crop is more than ~15 cells wide.
+    _GIF_MAX_TICKS = 10
+
+    def _animate(self, current_2d, states, out_path, dpi: Optional[int] = None):
+        fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
+        # No colorbar: the sweep animation is about WHERE the scan is, not the
+        # absolute sensor value.
+        ax.imshow(current_2d, cmap="hot", origin="lower", aspect="auto")
         ax.set_title("Row-major Peak Sweep")
 
         num_rows, num_cols = current_2d.shape
-        ax.set_xticks(np.arange(num_cols))
-        ax.set_yticks(np.arange(num_rows))
-        ax.set_xticklabels(np.arange(1, num_cols + 1))
-        ax.set_yticklabels(np.arange(1, num_rows + 1))
+
+        def _ticks(n):
+            """At most _GIF_MAX_TICKS evenly spaced cell indices (0-based)."""
+            step = max(1, int(np.ceil(n / self._GIF_MAX_TICKS)))
+            return np.arange(0, n, step)
+
+        xt, yt = _ticks(num_cols), _ticks(num_rows)
+        ax.set_xticks(xt)
+        ax.set_yticks(yt)
+        ax.set_xticklabels(xt + 1)          # cell indices stay 1-based
+        ax.set_yticklabels(yt + 1)
         ax.set_xlim(-0.5, num_cols - 0.5)
         ax.set_ylim(-0.5, num_rows - 0.5)
 
@@ -392,7 +433,8 @@ class PeakDetector:
                 fig, update, frames=len(states), init_func=init,
                 interval=700, blit=False, repeat=False,
             )
-            ani.save(out_path, writer="imagemagick", fps=1, dpi=150)
+            ani.save(out_path, writer=_gif_writer(), fps=1,
+                     dpi=dpi or self.gif_dpi)
         except Exception as e:
             print(f"Warning: could not save GIF ({e}). Skipping.")
         finally:

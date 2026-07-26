@@ -42,6 +42,7 @@ class ChargeSensorBinarizer:
         axis_vymin: Optional[float] = None,
         axis_vymax: Optional[float] = None,
         voltage_coords_path: Optional[str] = None,
+        data_is_ground_truth: bool = False,
     ) -> None:
         """
         Convert charge-sensor data to binary and save two images.
@@ -59,6 +60,14 @@ class ChargeSensorBinarizer:
         voltage_coords_path  : path to voltage_coordinates.txt; when given, overlay
                                markers are placed using actual voltage values instead
                                of row/col indices from summary_path
+        data_is_ground_truth : data_path is double_dot_data.npy, i.e. the exact
+                               binary charge-state-change map.  It is thresholded
+                               directly instead of being run through local-maxima
+                               detection, so the image matches
+                               double_dot_stability_diagram.jpg exactly.
+                               Local-maxima detection on the SENSOR signal cannot
+                               reproduce it: interdot transitions barely change the
+                               sensor amplitude, so they are missing from it.
         """
         xlabel = xlabel or _x_label()
         ylabel = ylabel or _y_label()
@@ -71,7 +80,12 @@ class ChargeSensorBinarizer:
             num_rows = len(unique_Vy)
             current_2d = Current.reshape(num_rows, num_cols)
 
-            binary = self._detect_local_maxima(current_2d, num_rows, num_cols)
+            if data_is_ground_truth:
+                binary = (current_2d > 0.5).astype(int)
+                title = "Ground Truth Transitions"
+            else:
+                binary = self._detect_local_maxima(current_2d, num_rows, num_cols)
+                title = "Local Maxima"
 
             vxmin, vxmax = unique_Vx.min(), unique_Vx.max()
             vymin, vymax = unique_Vy.min(), unique_Vy.max()
@@ -85,7 +99,8 @@ class ChargeSensorBinarizer:
             ax_ymax = axis_vymax if axis_vymax is not None else vymax
 
             self._save_no_overlay(binary, x_edges, y_edges, xlabel, ylabel,
-                                  ax_xmin, ax_xmax, ax_ymin, ax_ymax, output_no_overlay)
+                                  ax_xmin, ax_xmax, ax_ymin, ax_ymax,
+                                  output_no_overlay, title)
 
             # Prefer voltage_coords_path for overlay; fall back to row/col summary_path
             if voltage_coords_path is not None and os.path.isfile(voltage_coords_path):
@@ -95,6 +110,7 @@ class ChargeSensorBinarizer:
                     num_cols, num_rows, vxmin, vxmax, vymin, vymax,
                     ax_xmin, ax_xmax, ax_ymin, ax_ymax,
                     scanned_v, peaks_v, center_row, center_col, output_with_overlay,
+                    title,
                 )
             elif summary_path is not None:
                 self._save_with_overlay(
@@ -102,6 +118,7 @@ class ChargeSensorBinarizer:
                     num_cols, num_rows, vxmin, vxmax, vymin, vymax,
                     ax_xmin, ax_xmax, ax_ymin, ax_ymax,
                     summary_path, center_row, center_col, output_with_overlay,
+                    title,
                 )
         except Exception as e:
             print(f"Error in ChargeSensorBinarizer.convert: {e}")
@@ -134,14 +151,15 @@ class ChargeSensorBinarizer:
     # ------------------------------------------------------------------
 
     def _save_no_overlay(self, binary, x_edges, y_edges, xlabel, ylabel,
-                         ax_xmin, ax_xmax, ax_ymin, ax_ymax, out_path):
+                         ax_xmin, ax_xmax, ax_ymin, ax_ymax, out_path,
+                         title="Local Maxima"):
         fig, ax, _ = new_map_figure()
         ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
                       edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
         apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        ax.set_title("Local Maxima (No Overlay)")
+        ax.set_title(f"{title} (No Overlay)")
         ax.set_xticks(np.linspace(ax_xmin, ax_xmax, 5))
         ax.set_yticks(np.linspace(ax_ymin, ax_ymax, 5))
         ax.xaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
@@ -153,6 +171,7 @@ class ChargeSensorBinarizer:
         num_cols, num_rows, vxmin, vxmax, vymin, vymax,
         ax_xmin, ax_xmax, ax_ymin, ax_ymax,
         summary_path, center_row, center_col, out_path,
+        title="Local Maxima",
     ):
         scanned_cells, detected_peaks = self._parse_summary(summary_path)
         scanned_pts = [(r - 1, c - 1) for (r, c) in scanned_cells]
@@ -194,7 +213,7 @@ class ChargeSensorBinarizer:
         ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        ax.set_title("Local Maxima with Overlay")
+        ax.set_title(f"{title} with Overlay")
         ax.legend(loc="upper right")
         save_figure(fig, out_path)
 
@@ -207,6 +226,7 @@ class ChargeSensorBinarizer:
         num_cols, num_rows, vxmin, vxmax, vymin, vymax,
         ax_xmin, ax_xmax, ax_ymin, ax_ymax,
         scanned_v, peaks_v, center_row, center_col, out_path,
+        title="Local Maxima",
     ):
         max_dim = max(num_cols, num_rows)
         s_scan = 200 / max_dim
@@ -241,7 +261,7 @@ class ChargeSensorBinarizer:
         ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
-        ax.set_title("Local Maxima with Overlay")
+        ax.set_title(f"{title} with Overlay")
         ax.legend(loc="upper right")
         save_figure(fig, out_path)
 

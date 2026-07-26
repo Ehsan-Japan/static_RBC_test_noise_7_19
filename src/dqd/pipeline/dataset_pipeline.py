@@ -49,6 +49,8 @@ class DatasetPipeline:
     noise_std            : white-noise standard deviation added to the sensor output
     plot_dpi             : DPI for all saved figures
     save_gifs            : whether to save sweep-animation GIFs per peak
+    gif_dpi              : resolution of those GIFs; the dominant cost of a
+                           run when save_gifs is on (see below)
     fixed_matrices       : if provided, every sample uses this capacitance dict
                            instead of random generation (keys: Cdd, Cgd, Cds, Cgs)
     config               : optional CapacitanceConfig; uses defaults if None
@@ -92,6 +94,7 @@ class DatasetPipeline:
         noise_std: float = 0.01,
         plot_dpi: int = 300,
         save_gifs: bool = True,
+        gif_dpi: int = 150,
         fixed_matrices: Optional[Dict] = None,
         config: Optional[CapacitanceConfig] = None,
         # ── Axis labels (shared by every figure) ──────────────────────
@@ -133,6 +136,7 @@ class DatasetPipeline:
         self.noise_std = noise_std
         self.plot_dpi = plot_dpi
         self.save_gifs = save_gifs
+        self.gif_dpi = gif_dpi
         self.fixed_matrices = fixed_matrices
         self.config = config or CapacitanceConfig()
         # Publish the axis names / units so every figure in the pipeline —
@@ -673,6 +677,7 @@ class DatasetPipeline:
             ],
             "save_plots": True,
             "save_gifs": self.save_gifs,
+            "gif_dpi": self.gif_dpi,
             "save_txt": True,
             "start_pixel_x": local_i,
             "start_pixel_y": local_j,
@@ -694,6 +699,7 @@ class DatasetPipeline:
             if os.path.exists(src):
                 shutil.copy(src, peak_folder)
 
+        double_dot_npy_in_peak = os.path.join(peak_folder, "double_dot_data.npy")
         charge_sensing_npy_in_peak = os.path.join(
             peak_folder, "charge_sensing_data.npy"
         )
@@ -709,11 +715,19 @@ class DatasetPipeline:
             output_file=voltage_coords_path,
         )
 
-        # Binary images — use the full charge-sensing data so axes show [-1, 1]
+        # Binary images — built from the DOUBLE-DOT data, i.e. the same exact
+        # charge-state-change map as double_dot_stability_diagram.jpg and
+        # ground_truth_labels.npy, on the full grid so the axes show [-1, 1].
+        #
+        # These used to be local maxima of the charge-sensing signal, which is a
+        # measurement-derived approximation, not the ground truth: it misses
+        # every interdot transition (they barely move the sensor amplitude), so
+        # the binary images disagreed with the stability diagram.
         no_overlay_path = os.path.join(peak_folder, "binary_no_overlay.png")
         with_overlay_path = os.path.join(peak_folder, "binary_with_overlay.png")
         ChargeSensorBinarizer().convert(
-            data_path=charge_sensing_npy_in_peak,
+            data_path=double_dot_npy_in_peak,
+            data_is_ground_truth=True,
             output_no_overlay=no_overlay_path,
             output_with_overlay=with_overlay_path,
             center_row=center_row,
