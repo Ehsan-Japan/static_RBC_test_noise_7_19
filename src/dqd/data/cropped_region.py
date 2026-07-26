@@ -10,7 +10,11 @@ import matplotlib.pyplot as plt
 from typing import Optional, Tuple, Dict
 
 from ..coordinates.coordinate_mapper import CoordinateMapper
-from ..config.axis_labels import x_label, y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    new_map_figure,
+    save_figure,
+)
 
 
 class CroppedRegion:
@@ -105,7 +109,7 @@ class CroppedRegion:
                 center_i, center_j = i, j
 
         # ------ Plot ------
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax, cax = new_map_figure(with_colorbar=True)
 
         if cropped_array is not None:
             z_plot = cropped_array[:, 2].reshape(
@@ -132,12 +136,13 @@ class CroppedRegion:
             ax.add_patch(rect)
 
         if not is_double_dot:
-            ax.set_xlabel(x_label())
-            ax.set_ylabel(y_label())
-            plt.colorbar(im, label="Sensor Signal")
+            apply_voltage_axes(ax, extent_plot[0], extent_plot[1],
+                               extent_plot[2], extent_plot[3])
+            fig.colorbar(im, cax=cax, label="Sensor Signal")
             out_png = os.path.join(self.output_dir, f"{base_name}_cropped.png")
-            plt.savefig(out_png, dpi=300, bbox_inches="tight")
-        plt.close()
+            save_figure(fig, out_png)
+        else:
+            plt.close(fig)
 
         print(f"Center indices: (i={center_i}, j={center_j})")
         return center_i, center_j

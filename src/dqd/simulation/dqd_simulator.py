@@ -10,6 +10,12 @@ from typing import Dict, Optional
 from qarray import ChargeSensedDotArray, DotArray, NoNoise
 
 from ..config.axis_labels import x_label, y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    figure_size,
+    new_map_figure,
+    save_figure,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -32,16 +38,15 @@ def _charge_state_changes(n: np.ndarray) -> np.ndarray:
 
 
 def _save_plot(data, extent, title, xlabel, ylabel, save_path, dpi, show_colorbar=True):
-    fig = plt.figure()
-    im = plt.imshow(data, extent=extent, origin="lower", aspect="auto", cmap="hot")
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
+    fig, ax, cax = new_map_figure(with_colorbar=show_colorbar)
+    im = ax.imshow(data, extent=extent, origin="lower", aspect="auto", cmap="hot")
+    apply_voltage_axes(ax, extent[0], extent[1], extent[2], extent[3])
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     if show_colorbar:
-        plt.colorbar(im, fraction=0.046, pad=0.04)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=dpi)
-    plt.close(fig)
+        fig.colorbar(im, cax=cax)
+    save_figure(fig, save_path, dpi=dpi)
 
 
 # ---------------------------------------------------------------------------
@@ -144,16 +149,15 @@ class DQDSimulator:
 
         # Save noisy-z plot
         noisy_plot = os.path.join(self.save_dir, "images", "noisy_z_output.jpg")
-        plt.figure()
-        im = plt.imshow(noisy_z, extent=[vx_min, vx_max, vy_min, vy_max],
-                        origin="lower", aspect="auto", cmap="hot")
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
-        plt.title("Charge Sensor Output with Additional White Noise")
-        plt.colorbar(im, fraction=0.046, pad=0.04)
-        plt.tight_layout()
-        plt.savefig(noisy_plot, dpi=dpi)
-        plt.close()
+        fig, ax, cax = new_map_figure(with_colorbar=True)
+        im = ax.imshow(noisy_z, extent=[vx_min, vx_max, vy_min, vy_max],
+                       origin="lower", aspect="auto", cmap="hot")
+        apply_voltage_axes(ax, vx_min, vx_max, vy_min, vy_max)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title("Charge Sensor Output with Additional White Noise")
+        fig.colorbar(im, cax=cax)
+        save_figure(fig, noisy_plot, dpi=dpi)
 
         # Flatten and stack
         Vx_f, Vy_f = Vx.flatten(), Vy.flatten()
@@ -162,24 +166,26 @@ class DQDSimulator:
         np.save(npy_noisy, np.stack((Vx_f, Vy_f, noisy_z.flatten()), axis=-1))
 
         # Save side-by-side charge-sensing plot
-        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 5))
+        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True,
+                                 figsize=figure_size(ncols=2),
+                                 constrained_layout=True)
         im0 = axes[0].imshow(z, extent=[vx_min, vx_max, vy_min, vy_max],
                              origin="lower", aspect="auto", cmap="hot")
         axes[0].set_xlabel(xlabel)
         axes[0].set_ylabel(ylabel)
         axes[0].set_title("$z$")
-        plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        axes[0].set_aspect("equal", adjustable="box")
+        fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
         im1 = axes[1].imshow(dz, extent=[vx_min, vx_max, vy_min, vy_max],
                              origin="lower", aspect="auto", cmap="hot")
         axes[1].set_xlabel(xlabel)
         axes[1].set_ylabel(ylabel)
         axes[1].set_title(r"$\frac{dz}{dVx} + \frac{dz}{dVy}$")
-        plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        axes[1].set_aspect("equal", adjustable="box")
+        fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
-        plt.tight_layout()
-        plt.savefig(cs_save, dpi=dpi)
-        plt.close(fig)
+        save_figure(fig, cs_save, dpi=dpi)
 
         print(f"Charge sensing data saved: {npy_z}")
 

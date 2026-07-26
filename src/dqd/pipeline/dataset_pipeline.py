@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 from ..config.capacitance_config import CapacitanceConfig
 from ..config.axis_labels import set_axis_labels, x_label, y_label
+from ..config.figure_style import set_figure_style
 from ..simulation.matrix_generator import CapacitanceMatrixGenerator
 from ..simulation.dqd_simulator import DQDSimulator
 from ..analysis.peak_detector import PeakDetector
@@ -51,6 +52,8 @@ class DatasetPipeline:
     y_axis_name          : name of the y (vertical) gate axis on every plot
     x_axis_unit          : unit shown after the x-axis name, e.g. "mV"
     y_axis_unit          : unit shown after the y-axis name, e.g. "mV"
+    figure_width_in      : canvas width of every saved figure, in inches
+    figure_height_in     : canvas height of every saved figure, in inches
 
     Interdot break-point hyperparameters (see analysis/interdot_simple.py):
     interdot_neighbor_px      : peaks within this many grid pixels are treated
@@ -92,6 +95,9 @@ class DatasetPipeline:
         y_axis_name: str = "P2",
         x_axis_unit: str = "mV",
         y_axis_unit: str = "mV",
+        # ── Figure geometry (shared by every saved figure) ────────────
+        figure_width_in: float = 6.0,
+        figure_height_in: float = 6.0,
         # ── Evaluation hyperparameters ────────────────────────────────
         peak_neighbor_cols: int = 0,
         # ── Interdot break-point hyperparameters ──────────────────────
@@ -133,6 +139,13 @@ class DatasetPipeline:
             y_name=y_axis_name,
             x_unit=x_axis_unit,
             y_unit=y_axis_unit,
+        )
+        # Same idea for the canvas: one size and one dpi for every figure,
+        # so the saved images are directly comparable in a paper.
+        self.figure_style = set_figure_style(
+            width_in=figure_width_in,
+            height_in=figure_height_in,
+            dpi=plot_dpi,
         )
         self.angles = np.linspace(0, 90, num_angles + 2)[1:-1]
         self.peak_neighbor_cols = peak_neighbor_cols
@@ -445,6 +458,31 @@ class DatasetPipeline:
                     "A group needs at least this many points, and this many "
                     "distinct steps along its long axis, to count as a line "
                     "at all."
+                ),
+            },
+            "figure_width_in": {
+                "value": self.figure_style.width_in,
+                "folder_tag": None,
+                "meaning": (
+                    "Canvas width of every saved figure, in inches. Every "
+                    "image is saved at exactly this size (no tight-bbox "
+                    "cropping) so figures can be compared side by side."
+                ),
+            },
+            "figure_height_in": {
+                "value": self.figure_style.height_in,
+                "folder_tag": None,
+                "meaning": (
+                    "Canvas height of every saved figure, in inches. Panel "
+                    "figures widen by one canvas per panel."
+                ),
+            },
+            "plot_dpi": {
+                "value": self.plot_dpi,
+                "folder_tag": None,
+                "meaning": (
+                    "Output resolution. Canvas size x dpi = pixel size of "
+                    "every saved image."
                 ),
             },
             "x_axis_name": {

@@ -10,6 +10,11 @@ import matplotlib.pyplot as plt
 from typing import Optional, Set, Tuple
 
 from ..config.axis_labels import x_label as _x_label, y_label as _y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    new_map_figure,
+    save_figure,
+)
 
 
 class ChargeSensorBinarizer:
@@ -130,21 +135,18 @@ class ChargeSensorBinarizer:
 
     def _save_no_overlay(self, binary, x_edges, y_edges, xlabel, ylabel,
                          ax_xmin, ax_xmax, ax_ymin, ax_ymax, out_path):
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax, _ = new_map_figure()
         ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
                       edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
-        ax.set_aspect("equal")
+        apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.set_title("Local Maxima (No Overlay)")
-        ax.set_xlim(ax_xmin, ax_xmax)
-        ax.set_ylim(ax_ymin, ax_ymax)
         ax.set_xticks(np.linspace(ax_xmin, ax_xmax, 5))
         ax.set_yticks(np.linspace(ax_ymin, ax_ymax, 5))
         ax.xaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
         ax.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
-        plt.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, out_path)
 
     def _save_with_overlay(
         self, binary, x_edges, y_edges, xlabel, ylabel,
@@ -171,10 +173,9 @@ class ChargeSensorBinarizer:
         s_scan = 200 / max_dim
         s_peak = 400 / max_dim
 
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax, _ = new_map_figure()
         ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
                       edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
-        ax.set_aspect("equal")
 
         if sx:
             ax.scatter(sx, sy, color="blue", s=s_scan, marker="s", alpha=0.5, label="Measured Cells")
@@ -186,8 +187,7 @@ class ChargeSensorBinarizer:
             cy = vymin + (center_row - 0.5) * cell_h
             ax.scatter(cx, cy, color="lime", s=s_peak * 1.5, marker="*", edgecolors="black")
 
-        ax.set_xlim(ax_xmin, ax_xmax)
-        ax.set_ylim(ax_ymin, ax_ymax)
+        apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xticks(np.linspace(ax_xmin, ax_xmax, 5))
         ax.set_yticks(np.linspace(ax_ymin, ax_ymax, 5))
         ax.xaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
@@ -196,8 +196,7 @@ class ChargeSensorBinarizer:
         ax.set_ylabel(ylabel)
         ax.set_title("Local Maxima with Overlay")
         ax.legend(loc="upper right")
-        plt.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, out_path)
 
     # ------------------------------------------------------------------
     # Overlay using direct voltage coordinates  (new path)
@@ -213,10 +212,9 @@ class ChargeSensorBinarizer:
         s_scan = 200 / max_dim
         s_peak = 400 / max_dim
 
-        fig, ax = plt.subplots(figsize=(8, 6))
+        fig, ax, _ = new_map_figure()
         ax.pcolormesh(x_edges, y_edges, binary, cmap="binary",
                       edgecolors="gray", linewidth=0.2, vmin=0, vmax=1)
-        ax.set_aspect("equal")
 
         if scanned_v:
             sx = [v[0] for v in scanned_v]
@@ -236,8 +234,7 @@ class ChargeSensorBinarizer:
             ax.scatter(cx, cy, color="lime", s=s_peak * 1.5, marker="*",
                        edgecolors="black", label="Peak Centre")
 
-        ax.set_xlim(ax_xmin, ax_xmax)
-        ax.set_ylim(ax_ymin, ax_ymax)
+        apply_voltage_axes(ax, ax_xmin, ax_xmax, ax_ymin, ax_ymax)
         ax.set_xticks(np.linspace(ax_xmin, ax_xmax, 5))
         ax.set_yticks(np.linspace(ax_ymin, ax_ymax, 5))
         ax.xaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
@@ -246,8 +243,7 @@ class ChargeSensorBinarizer:
         ax.set_ylabel(ylabel)
         ax.set_title("Local Maxima with Overlay")
         ax.legend(loc="upper right")
-        plt.savefig(out_path, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, out_path)
 
     @staticmethod
     def _parse_voltage_coords(path: str):

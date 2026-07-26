@@ -26,7 +26,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Tuple
 
-from ..config.axis_labels import x_label, y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    new_map_figure,
+    save_figure,
+)
 
 
 class InterdotDetector:
@@ -357,7 +361,7 @@ class InterdotDetector:
         x_edges = np.linspace(vxmin, vxmax, current_2d.shape[1] + 1)
         y_edges = np.linspace(vymin, vymax, current_2d.shape[0] + 1)
 
-        fig, ax = plt.subplots(figsize=(12, 12))
+        fig, ax, _ = new_map_figure()
         ax.pcolormesh(x_edges, y_edges, current_2d,
                       cmap="gray_r", edgecolors="k", linewidth=0.3)
 
@@ -391,16 +395,11 @@ class InterdotDetector:
                        marker="x", linewidths=1.5,
                        label="Interdot Peaks", zorder=5)
 
-        ax.set_xlabel(x_label())
-        ax.set_ylabel(y_label())
-        ax.set_xlim(vxmin, vxmax)
-        ax.set_ylim(vymin, vymax)
-        ax.set_aspect("equal")
+        apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax)
         ax.legend(loc="upper right")
 
         out = os.path.join(self.sample_dir, "summary_with_interdot.png")
-        plt.savefig(out, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, out)
         print(f"[InterdotDetector] plot saved → {out}")
 
     # ------------------------------------------------------------------

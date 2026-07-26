@@ -11,6 +11,12 @@ import matplotlib.ticker as ticker
 from typing import Dict, Optional
 
 from ..config.axis_labels import x_label as _x_label, y_label as _y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    figure_size,
+    new_map_figure,
+    save_figure,
+)
 
 
 class Plotter:
@@ -47,7 +53,8 @@ class Plotter:
         vy_max = voltage_sweep["vy_max"]
         extent = [vx_min, vx_max, vy_min, vy_max]
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
+        fig, axes = plt.subplots(1, 2, figsize=figure_size(ncols=2),
+                                 constrained_layout=True)
 
         im0 = axes[0].imshow(z, extent=extent, origin="lower", aspect="auto", cmap="hot")
         axes[0].set_xlabel(_x_label())
@@ -65,8 +72,7 @@ class Plotter:
             "Gradient of Charge Sensor Output"
         )
 
-        plt.savefig(save_paths["charge_sensing_save_path"], dpi=dpi)
-        plt.close(fig)
+        save_figure(fig, save_paths["charge_sensing_save_path"], dpi=dpi)
 
     # ------------------------------------------------------------------
     # Normalised 3-D surface plot  (from old utility1.py / sweeping_plot.py)
@@ -124,7 +130,7 @@ class Plotter:
         }
         os.makedirs(save_path, exist_ok=True)
 
-        fig = plt.figure(figsize=(12, 9))
+        fig = plt.figure(figsize=figure_size(), constrained_layout=True)
         ax = fig.add_subplot(111, projection="3d")
         surf = ax.plot_surface(pixel_cols, pixel_rows, current_norm, **cfg["surface"])
         ax.scatter(peak_j + 1, peak_i + 1, current_norm[peak_i, peak_j], **cfg["point"])
@@ -142,9 +148,7 @@ class Plotter:
         ax.set_ylim(0.5, num_rows + 0.5)
         cbar = fig.colorbar(surf, shrink=0.6, aspect=20, pad=0.1)
         cbar.set_label("Normalised Value", rotation=270, labelpad=20)
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_path, "normalized_3d_surface.png"), dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, os.path.join(save_path, "normalized_3d_surface.png"))
 
     # ------------------------------------------------------------------
     # Ray plots  (from old plotting_functions.py)
@@ -160,15 +164,13 @@ class Plotter:
         prefix: str = "original",
     ) -> None:
         X, Y, I = data_array[:, 0], data_array[:, 1], data_array[:, 2]
-        plt.figure(figsize=(8, 6))
-        sc = plt.scatter(X, Y, c=I, cmap=cmap)
-        plt.colorbar(sc, label="Current (nA)")
-        plt.xlabel(x_label or _x_label())
-        plt.ylabel(y_label or _y_label())
-        plt.xlim(X.min(), X.max())
-        plt.ylim(Y.min(), Y.max())
-        plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
-        plt.close()
+        fig, ax, cax = new_map_figure(with_colorbar=True)
+        sc = ax.scatter(X, Y, c=I, cmap=cmap)
+        fig.colorbar(sc, cax=cax, label="Current (nA)")
+        apply_voltage_axes(ax, X.min(), X.max(), Y.min(), Y.max())
+        ax.set_xlabel(x_label or _x_label())
+        ax.set_ylabel(y_label or _y_label())
+        save_figure(fig, os.path.join(save_dir, f"{prefix}.png"))
 
     @staticmethod
     def plot_rays_only(
@@ -180,17 +182,15 @@ class Plotter:
         prefix: str = "rays_only",
     ) -> None:
         Xr, Yr, Ir = rays_data[:, 0], rays_data[:, 1], rays_data[:, 2]
-        plt.figure(figsize=(8, 6))
-        sc = plt.scatter(Xr, Yr, c=Ir, cmap=cmap, s=30, edgecolor="black",
-                         vmin=Ir.min(), vmax=Ir.max())
-        plt.colorbar(sc, label="Current (nA)")
-        plt.xlabel(x_label or _x_label())
-        plt.ylabel(y_label or _y_label())
-        plt.grid(True)
-        plt.xlim(Xr.min(), Xr.max())
-        plt.ylim(Yr.min(), Yr.max())
-        plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
-        plt.close()
+        fig, ax, cax = new_map_figure(with_colorbar=True)
+        sc = ax.scatter(Xr, Yr, c=Ir, cmap=cmap, s=30, edgecolor="black",
+                        vmin=Ir.min(), vmax=Ir.max())
+        fig.colorbar(sc, cax=cax, label="Current (nA)")
+        ax.grid(True)
+        apply_voltage_axes(ax, Xr.min(), Xr.max(), Yr.min(), Yr.max())
+        ax.set_xlabel(x_label or _x_label())
+        ax.set_ylabel(y_label or _y_label())
+        save_figure(fig, os.path.join(save_dir, f"{prefix}.png"))
 
     @staticmethod
     def plot_combined(
@@ -206,17 +206,16 @@ class Plotter:
         Xr, Yr, Ir = rays_data[:, 0], rays_data[:, 1], rays_data[:, 2]
         combined_I = np.concatenate([I, Ir])
         vmin, vmax = combined_I.min(), combined_I.max()
-        plt.figure(figsize=(10, 8))
-        plt.scatter(X, Y, c=I, cmap=cmap, s=20, edgecolor="none", vmin=vmin, vmax=vmax)
-        plt.scatter(Xr, Yr, c=Ir, cmap=cmap, s=40, edgecolor="black",
-                    marker="o", vmin=vmin, vmax=vmax)
-        plt.colorbar(label="Current (nA)")
-        plt.xlabel(x_label or _x_label())
-        plt.ylabel(y_label or _y_label())
-        plt.xlim(min(X.min(), Xr.min()), max(X.max(), Xr.max()))
-        plt.ylim(min(Y.min(), Yr.min()), max(Y.max(), Yr.max()))
-        plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
-        plt.close()
+        fig, ax, cax = new_map_figure(with_colorbar=True)
+        ax.scatter(X, Y, c=I, cmap=cmap, s=20, edgecolor="none", vmin=vmin, vmax=vmax)
+        sc = ax.scatter(Xr, Yr, c=Ir, cmap=cmap, s=40, edgecolor="black",
+                        marker="o", vmin=vmin, vmax=vmax)
+        fig.colorbar(sc, cax=cax, label="Current (nA)")
+        apply_voltage_axes(ax, min(X.min(), Xr.min()), max(X.max(), Xr.max()),
+                           min(Y.min(), Yr.min()), max(Y.max(), Yr.max()))
+        ax.set_xlabel(x_label or _x_label())
+        ax.set_ylabel(y_label or _y_label())
+        save_figure(fig, os.path.join(save_dir, f"{prefix}.png"))
 
     @staticmethod
     def plot_current_vs_distance(
@@ -228,7 +227,7 @@ class Plotter:
         cmap: str = "viridis",
     ) -> None:
         os.makedirs(save_dir, exist_ok=True)
-        plt.figure(figsize=(12, 8))
+        fig = plt.figure(figsize=figure_size(), constrained_layout=True)
         colors = get_cmap(cmap)(np.linspace(0, 1, len(rays_dict)))
         for idx, angle in enumerate(sorted(rays_dict.keys())):
             current = rays_dict[angle]["Current"]
@@ -240,9 +239,7 @@ class Plotter:
         plt.legend(title="Angle", fontsize=12, loc="best")
         plt.grid(True, which="both", linestyle="--", linewidth=0.5)
         plt.xlim(0, 1)
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
-        plt.close()
+        save_figure(fig, os.path.join(save_dir, f"{prefix}.png"))
 
     @staticmethod
     def plot_each_ray_separately(
@@ -256,7 +253,7 @@ class Plotter:
             current = data["Current"]
             dist = np.linspace(0, 1, len(current))
             a = round(angle)
-            plt.figure(figsize=(10, 6))
+            fig = plt.figure(figsize=figure_size(), constrained_layout=True)
             plt.plot(dist, current, label=f"Ray {a}°", color="blue",
                      linewidth=2, marker="o", markersize=6)
             peaks_idx, _ = find_peaks(current)
@@ -266,8 +263,7 @@ class Plotter:
             plt.ylabel(ylabel, fontsize=14)
             plt.grid(True, which="both", linestyle="--", linewidth=0.5)
             plt.legend()
-            plt.savefig(os.path.join(save_dir, f"{prefix}_{a}deg.png"), bbox_inches="tight")
-            plt.close()
+            save_figure(fig, os.path.join(save_dir, f"{prefix}_{a}deg.png"))
 
     @staticmethod
     def plot_rays_with_peaks(
@@ -284,11 +280,13 @@ class Plotter:
     ) -> None:
         os.makedirs(save_dir, exist_ok=True)
         X, Y, I = data_array[:, 0], data_array[:, 1], data_array[:, 2]
-        plt.figure(figsize=(10, 8))
-        sc = plt.scatter(X, Y, c=I, cmap=cmap, s=10, edgecolor="none", alpha=1)
-        plt.colorbar(sc, label="Current (nA)")
-        plt.xlabel(xlabel or _x_label(), fontsize=14)
-        plt.ylabel(ylabel or _y_label(), fontsize=14)
+        fig, ax, cax = new_map_figure(with_colorbar=True)
+        plt.sca(ax)
+        sc = ax.scatter(X, Y, c=I, cmap=cmap, s=10, edgecolor="none", alpha=1)
+        fig.colorbar(sc, cax=cax, label="Current (nA)")
+        apply_voltage_axes(ax, X.min(), X.max(), Y.min(), Y.max())
+        ax.set_xlabel(xlabel or _x_label(), fontsize=14)
+        ax.set_ylabel(ylabel or _y_label(), fontsize=14)
         peaks_added = False
         for angle, ray in rays_dict.items():
             rx, ry, rc = ray["X"], ray["Y"], ray["Current"]
@@ -299,6 +297,4 @@ class Plotter:
                             s=peak_marker_size, c=peak_marker_color, zorder=6,
                             label="Peaks" if not peaks_added else "_nolegend_")
                 peaks_added = True
-        plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, f"{prefix}.png"), bbox_inches="tight")
-        plt.close()
+        save_figure(fig, os.path.join(save_dir, f"{prefix}.png"))

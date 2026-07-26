@@ -22,8 +22,18 @@ def main():
         x_axis_unit="mV",
         y_axis_unit="mV",
 
+        # ── Figure geometry ───────────────────────────────────────────
+        # Canvas size of EVERY saved figure, in inches.  Images are saved at
+        # exactly this size (no tight-bbox cropping) and the plotting box sits
+        # at the same place inside it, so all figures have the same physical
+        # size and the same data scale — they can be compared or placed side
+        # by side in the paper without rescaling.  Pixel size = size x dpi
+        # (6.0 in x 300 dpi = 1800 px).  Panel figures widen per panel.
+        figure_width_in=6.0,
+        figure_height_in=6.0,
+
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=30,
+        n_samples=34,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,

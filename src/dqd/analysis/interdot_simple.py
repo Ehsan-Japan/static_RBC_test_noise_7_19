@@ -26,7 +26,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import List, Tuple
 
-from ..config.axis_labels import x_label, y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    new_map_figure,
+    save_figure,
+)
 
 
 # ----------------------------------------------------------------------
@@ -389,7 +393,7 @@ def _plot(sample_dir, current_2d, peaks_v, break_pts, connections, interdot_v,
     x_edges = np.linspace(vx_min, vx_max, current_2d.shape[1] + 1)
     y_edges = np.linspace(vy_min, vy_max, current_2d.shape[0] + 1)
 
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax, _ = new_map_figure()
     ax.pcolormesh(x_edges, y_edges, current_2d, cmap="hot")
 
     if peaks_v:
@@ -408,13 +412,8 @@ def _plot(sample_dir, current_2d, peaks_v, break_pts, connections, interdot_v,
         ax.scatter(a[:, 0], a[:, 1], c="red", s=90, marker="x", linewidths=2,
                    label="Interdot peaks")
 
-    ax.set_xlim(vx_min, vx_max)
-    ax.set_ylim(vy_min, vy_max)
-    ax.set_aspect("equal")
-    ax.set_xlabel(x_label())
-    ax.set_ylabel(y_label())
+    apply_voltage_axes(ax, vx_min, vx_max, vy_min, vy_max)
     ax.legend(loc="upper right")
     out = os.path.join(sample_dir, "summary_with_interdot.png")
-    plt.savefig(out, dpi=300, bbox_inches="tight")
-    plt.close()
+    save_figure(fig, out)
     print(f"[interdot_simple] plot saved -> {out}")

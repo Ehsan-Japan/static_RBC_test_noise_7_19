@@ -47,8 +47,13 @@ DEFAULT_DPI = 300
 # Identical in every figure, so the data area is always in the same place.
 # The right-hand strip is reserved for a colorbar whether or not one is drawn,
 # so a figure with a colorbar and one without still share the same axes box.
-AXES_RECT = (0.150, 0.130, 0.700, 0.800)
-CBAR_RECT = (0.870, 0.130, 0.030, 0.800)
+#
+# Width and height are equal, so on a square canvas the box is square in
+# INCHES: with equal aspect and equal vx / vy ranges the x axis and the y
+# axis then have the same physical length.  (imshow's default aspect="auto"
+# is what used to stretch the stability diagram into a wide rectangle.)
+AXES_RECT = (0.150, 0.150, 0.700, 0.700)
+CBAR_RECT = (0.870, 0.150, 0.030, 0.700)
 
 
 @dataclass

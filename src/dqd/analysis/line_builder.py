@@ -40,7 +40,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from ..config.axis_labels import x_label, y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    new_map_figure,
+    save_figure,
+)
 
 Cell = Tuple[int, int]          # (row, col) on the voltage grid
 
@@ -525,13 +529,9 @@ def _grid_shape(sample_dir: str, grad: Optional[np.ndarray]) -> Tuple[int, int]:
 
 def _base_axes(extent, title: str):
     vx_min, vx_max, vy_min, vy_max = extent
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax, _ = new_map_figure()
     ax.set_facecolor("white")
-    ax.set_xlim(vx_min, vx_max)
-    ax.set_ylim(vy_min, vy_max)
-    ax.set_aspect("equal")
-    ax.set_xlabel(x_label())
-    ax.set_ylabel(y_label())
+    apply_voltage_axes(ax, vx_min, vx_max, vy_min, vy_max)
     ax.set_title(title)
     ax.grid(True, color="0.92", lw=0.5)
     ax.set_axisbelow(True)
@@ -562,8 +562,7 @@ def _plot_lines(sample_dir, cells, segments, extent, res_x, res_y, dpi):
 
     ax.legend(loc="upper right", framealpha=0.95)
     out = os.path.join(sample_dir, "lines_fitted.png")
-    plt.savefig(out, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
+    save_figure(fig, out, dpi=dpi)
     print(f"[line_builder] plot saved -> {out}")
 
 
@@ -601,8 +600,7 @@ def _plot_breaks(sample_dir, cells, segments, breaks, connections, interdot,
 
     ax.legend(loc="upper right", framealpha=0.95)
     out = os.path.join(sample_dir, "lines_breakpoints.png")
-    plt.savefig(out, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
+    save_figure(fig, out, dpi=dpi)
     print(f"[line_builder] plot saved -> {out}")
 
 
