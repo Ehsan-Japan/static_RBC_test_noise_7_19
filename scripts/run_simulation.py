@@ -13,8 +13,8 @@ def main():
 
         # ── Axis labels ───────────────────────────────────────────────
         # Names and units of the two gate axes.  Set here ONCE: every figure
-        # the pipeline produces (stability diagram, overlays, binary images,
-        # interdot plots) is labelled from these, so all images agree.
+        # the pipeline produces (stability diagram, overlays, binary images)
+        # is labelled from these, so all images agree.
         # Rendered as "<name> (<unit>)", e.g. "P1 (mV)"; set the unit to ""
         # to print the bare name.
         x_axis_name="P1",
@@ -38,7 +38,7 @@ def main():
         figure_height_in=12.0,
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=142,
+        n_samples=201,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,
@@ -77,18 +77,6 @@ def main():
 
         # ── Evaluation ────────────────────────────────────────────────
         peak_neighbor_cols=2,
-
-        # ── Interdot break-point detection ────────────────────────────
-        # A peak is a BREAK POINT (a honeycomb vertex) when the two sweeps that
-        # start there — one walking up the transition line, one walking down —
-        # trace slopes that differ by more than this, in grid-pixel dcol/drow
-        # units.  A straight line gives both sweeps the same slope; a vertex
-        # bends it.  Lower = more break points detected.
-        interdot_min_slope_change=0.8,
-        # Max gap (grid pixels) allowed between the two break points that get
-        # connected.  The interdot transition is then located along that
-        # segment, at the strongest cell of the sensor gradient.
-        interdot_connect_px=50,
     )
     pipeline.run()
 

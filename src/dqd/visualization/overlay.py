@@ -6,7 +6,7 @@ import os
 import re
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from ..config.figure_style import (
     LABEL_PEAK,
@@ -546,11 +546,6 @@ class OverlayRenderer:
         ray_peak_linewidths: float = 2,
         ray_peak_edgecolor: Optional[str] = None,
         ray_peak_label: Optional[str] = None,
-        break_points: Optional[Sequence[Tuple[float, float]]] = None,
-        break_connections: Optional[
-            Sequence[Tuple[Tuple[float, float], Tuple[float, float]]]
-        ] = None,
-        break_point_size: float = 130,
         legend_fontsize: int = 8,
     ) -> None:
         """
@@ -575,9 +570,6 @@ class OverlayRenderer:
         ray_peak_size / ray_peak_marker / ray_peak_linewidths /
         ray_peak_edgecolor  : marker styling for the ray-peak crosses.
         ray_peak_label : legend label used with ``ray_peak_color``.
-        break_points   : [(vx, vy), ...] break points to overlay (orange ^)
-        break_connections : [((vx1, vy1), (vx2, vy2)), ...] dashed connections
-                         between the break points that were paired up.
         legend_fontsize : font size of the legend (bigger for publication).
         """
         if show_ray_peaks is None:
@@ -658,19 +650,6 @@ class OverlayRenderer:
             else:
                 scatter_kw.update(color=ray_peak_color)
             ax.scatter(pxs, pys, **scatter_kw)
-
-        # ---- Break points (honeycomb-vertex kinks) and their connections ----
-        if break_connections:
-            for i, ((vx1, vy1), (vx2, vy2)) in enumerate(break_connections):
-                ax.plot([vx1, vx2], [vy1, vy2], "--", color="lime", lw=1.8,
-                        zorder=8,
-                        label="Break-Point Connections" if i == 0 else "_nolegend_")
-        if break_points:
-            bxs = [p[0] for p in break_points]
-            bys = [p[1] for p in break_points]
-            ax.scatter(bxs, bys, marker="^", s=break_point_size,
-                       facecolors="orange", edgecolors="black", linewidths=1.2,
-                       zorder=9, label="Break Points")
 
         apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax)
 

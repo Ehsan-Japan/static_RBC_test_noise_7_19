@@ -113,21 +113,6 @@ class SampleEvaluator:
 
         return all_scanned, all_peaks
 
-    def _load_interdot_pixels(self) -> Set[Tuple[int, int]]:
-        """Read interdot_transitions.txt and return the peak pixel set."""
-        import re
-        path = os.path.join(self.sample_dir, "interdot_transitions.txt")
-        pixels: Set[Tuple[int, int]] = set()
-        if not os.path.isfile(path):
-            return pixels
-        with open(path) as f:
-            for line in f:
-                m = re.match(r"\(([-+]?\d*\.?\d+),\s*([-+]?\d*\.?\d+)\)", line.strip())
-                if m:
-                    pixels.add(self._voltage_to_pixel(float(m.group(1)),
-                                                      float(m.group(2))))
-        return pixels
-
     # ------------------------------------------------------------------
     # evaluation.txt
     # ------------------------------------------------------------------
@@ -183,13 +168,6 @@ class SampleEvaluator:
         n_scanned = len(scanned_pixels)
         coverage  = n_scanned / total_cells * 100
 
-        # Interdot-specific tracking: how many of the break-point interdot peaks
-        # landed on a true transition pixel (their contribution to recall).
-        interdot_pixels = self._load_interdot_pixels()
-        n_interdot = len(interdot_pixels)
-        interdot_tp = len(interdot_pixels & gt_pixels)
-        interdot_hit = (interdot_tp / n_interdot * 100) if n_interdot > 0 else 0.0
-
         out_path = os.path.join(self.sample_dir, "evaluation.txt")
         with open(out_path, "w") as f:
             f.write("Peak Detection Evaluation Report\n")
@@ -203,10 +181,6 @@ class SampleEvaluator:
             f.write(f"Recall    : {recall:.2f}%\n")
             f.write(f"F1 Score  : {f1:.2f}%\n")
             f.write(f"Accuracy  : {accuracy:.2f}%\n\n")
-            f.write("Interdot Transitions (break-point method):\n")
-            f.write(f"  Interdot Peaks Detected : {n_interdot}\n")
-            f.write(f"  Interdot On True Line   : {interdot_tp}\n")
-            f.write(f"  Interdot Hit Rate       : {interdot_hit:.2f}%\n\n")
             f.write("Measurement Statistics:\n")
             f.write(f"  Number of Rays : {self.num_angles}\n")
             f.write(f"  Ray Resolution : {self.ray_resolution}\n")

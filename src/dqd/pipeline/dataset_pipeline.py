@@ -6,7 +6,7 @@ import os
 import json
 import shutil
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 from ..config.capacitance_config import CapacitanceConfig
 from ..config.axis_labels import set_axis_labels, x_label, y_label
@@ -60,13 +60,6 @@ class DatasetPipeline:
     y_axis_unit          : unit shown after the y-axis name, e.g. "mV"
     figure_width_in      : canvas width of every saved figure, in inches
     figure_height_in     : canvas height of every saved figure, in inches
-
-    Interdot break-point hyperparameters (see analysis/interdot_simple.py):
-    interdot_min_slope_change : a peak is a break point when the two sweeps
-                                starting there trace slopes differing by more
-                                than this (grid-pixel dcol/drow units)
-    interdot_connect_px       : max gap, in grid pixels, between two break
-                                points for them to be connected
     """
 
     def __init__(
@@ -101,9 +94,6 @@ class DatasetPipeline:
         figure_height_in: float = 12.0,
         # ── Evaluation hyperparameters ────────────────────────────────
         peak_neighbor_cols: int = 0,
-        # ── Interdot break-point hyperparameters ──────────────────────
-        interdot_connect_px: int = 50,
-        interdot_min_slope_change: float = 0.8,
     ):
         self.base_save_dir = base_save_dir
         self.n_samples = n_samples
@@ -130,8 +120,7 @@ class DatasetPipeline:
         self.fixed_matrices = fixed_matrices
         self.config = config or CapacitanceConfig()
         # Publish the axis names / units so every figure in the pipeline —
-        # simulator, overlays, binariser, interdot plots — labels its axes
-        # the same way.
+        # simulator, overlays, binariser — labels its axes the same way.
         self.axis_labels = set_axis_labels(
             x_name=x_axis_name,
             y_name=y_axis_name,
@@ -147,8 +136,6 @@ class DatasetPipeline:
         )
         self.angles = np.linspace(0, 90, num_angles + 2)[1:-1]
         self.peak_neighbor_cols = peak_neighbor_cols
-        self.interdot_connect_px = interdot_connect_px
-        self.interdot_min_slope_change = interdot_min_slope_change
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -161,10 +148,6 @@ class DatasetPipeline:
             f"_rays_{self.num_angles}"
             f"_res_{self.ray_resolution}"
             f"_image_res_{self.x_resolution}"
-            # interdot break-point hyperparameters, so runs with different
-            # settings land in different folders and stay comparable
-            f"_cx_{self.interdot_connect_px}"
-            f"_sl_{self.interdot_min_slope_change:g}"
         )
         save_dir = os.path.join(self.base_save_dir, run_folder)
         os.makedirs(save_dir, exist_ok=True)
@@ -187,11 +170,6 @@ class DatasetPipeline:
 
     def _run_sample(self, sample_idx: int, sample_dir: str) -> None:
         vs = self.voltage_sweep
-
-        # Break points found by the per-peak slope test, in grid (row, col).
-        # Collected here so the sample-level detector can connect them once
-        # every peak of the sample has been swept.
-        self._break_points: List[Tuple[int, int]] = []
 
         # Every sample-level figure is also saved without its legend into
         # <sample>/figures_no_legend/, ready for legends drawn by hand for
@@ -307,32 +285,6 @@ class DatasetPipeline:
                     print(f"  [WARN] Peak {peak_idx} (angle {angle_str}) failed: {exc}")
                     traceback.print_exc()
 
-        # ---- 6.5 Interdot transitions (break-point connection) ----
-        # Every peak whose two sweeps disagreed in slope was recorded as a
-        # break point while it was processed.  Connect the closest ones and
-        # scan the sensor gradient along each connection to
-        # find the positive-slope interdot transitions the amplitude sweeps
-        # miss.  Runs BEFORE the overlays and evaluation so that both the final
-        # images and evaluation.txt include the interdot peaks (they are written
-        # into cropped_results/interdot_peaks/voltage_coordinates.txt, which the
-        # overlays and the evaluator both walk).
-        try:
-            from ..analysis.interdot_simple import detect_interdot
-            detect_interdot(
-                sample_dir=sample_dir,
-                charge_sensing_path=charge_sensing_path,
-                vx_min=vs["vx_min"],
-                vx_max=vs["vx_max"],
-                vy_min=vs["vy_min"],
-                vy_max=vs["vy_max"],
-                break_points=self._break_points,
-                connect_px=self.interdot_connect_px,
-            )
-        except Exception as exc:
-            import traceback
-            print(f"  [WARN] Interdot detection failed: {exc}")
-            traceback.print_exc()
-
         # ---- 7. Sample-level overlays ----
         try:
             self._generate_sample_overlays(
@@ -416,16 +368,15 @@ class DatasetPipeline:
         """
         Write hyperparameters.json into the sample folder.
 
-        The run-folder name only carries the short tags (_sl_, _cx_);
-        this file spells the same values out under their full parameter names
-        with a "meaning" string next to each, so a sample is self-describing
-        even when it is copied out of its run folder.  JSON has no comment
-        syntax, hence the {"value": …, "meaning": …} pairs.
+        This file spells the analysis knobs out under their full parameter
+        names with a "meaning" string next to each, so a sample is
+        self-describing even when it is copied out of its run folder.  JSON
+        has no comment syntax, hence the {"value": …, "meaning": …} pairs.
 
         The simulator parameters (voltage_sweep, capacitance, …) are kept at
         the TOP level of the file exactly as DQDSimulator used to write them,
-        because line_builder, build_lines.py and rebuild_publication_figures.py
-        all read ``hyperparameters.json["voltage_sweep"]``.
+        because rebuild_publication_figures.py reads
+        ``hyperparameters.json["voltage_sweep"]``.
         """
         hyperparams = {
             "crop_size": {
@@ -434,26 +385,6 @@ class DatasetPipeline:
                 "meaning": (
                     "Half-width (in mV) of the cropping window taken around "
                     "each detected peak before the directional sweeps run."
-                ),
-            },
-            "interdot_connect_px": {
-                "value": self.interdot_connect_px,
-                "folder_tag": "cx",
-                "meaning": (
-                    "Maximum gap, in grid pixels, between two break points for "
-                    "them to be connected. The interdot transition is then "
-                    "located along that segment, at the strongest cell of the "
-                    "sensor gradient."
-                ),
-            },
-            "interdot_min_slope_change": {
-                "value": self.interdot_min_slope_change,
-                "folder_tag": "sl",
-                "meaning": (
-                    "Break-point test. A peak is a break point (a honeycomb "
-                    "vertex) when the two sweeps starting there trace slopes "
-                    "differing by more than this, in grid-pixel dcol/drow "
-                    "units. Lower = more break points."
                 ),
             },
             "figure_width_in": {
@@ -517,9 +448,7 @@ class DatasetPipeline:
             "are the simulator parameters; the 'hyperparameters' block "
             "documents the analysis knobs, where 'folder_tag' is the "
             "abbreviation the same value appears under in the run folder name "
-            "(null = not part of the folder name). See "
-            "src/dqd/analysis/interdot_simple.py for the interdot_* "
-            "break-point method."
+            "(null = not part of the folder name)."
         )
         payload["hyperparameters"] = hyperparams
         out_path = os.path.join(sample_dir, "hyperparameters.json")
@@ -613,10 +542,7 @@ class DatasetPipeline:
         analysis_params = {
             "sweeps": [
                 # Two sweeps, both starting AT the peak and walking in
-                # opposite directions along the dot-to-lead line.  The
-                # difference between the slopes they trace out is what
-                # identifies the peak as a break point (a honeycomb
-                # vertex) — see _break_point_from_sweeps below.
+                # opposite directions along the dot-to-lead line.
                 {
                     "name": "bottom_up_right_left",
                     "start_row": local_i,
@@ -651,19 +577,7 @@ class DatasetPipeline:
         }
 
         detector = PeakDetector(output_dir=peak_folder)
-        sweep_results = detector.run(data_path=cropped_path,
-                                     hyperparams=analysis_params)
-
-        # Break-point test: the two sweeps both started at this peak and walked
-        # the transition line in opposite directions.  If the slopes they
-        # traced differ by more than interdot_min_slope_change, the line bends
-        # here — a honeycomb vertex, i.e. a break point.
-        from ..analysis.interdot_simple import slope_difference
-        diff = slope_difference(sweep_results["sweeps"])
-        if diff is not None and diff > self.interdot_min_slope_change:
-            self._break_points.append((center_i, center_j))
-            print(f"    break point: slope difference {diff:.2f} > "
-                  f"{self.interdot_min_slope_change}")
+        detector.run(data_path=cropped_path, hyperparams=analysis_params)
 
         # Gather every GIF of this peak into <sample>/gifs/ as well, so all the
         # sweeps of the whole sample can be browsed in one place instead of
@@ -819,34 +733,6 @@ class DatasetPipeline:
                     **_cross_kwargs,
                     **_ray_kwargs,
                 )
-
-                # Publication figures: same as summary_total / summary_peaks_only
-                # but with the interdot break points and their connections on top.
-                from ..analysis.interdot_simple import load_break_points
-                break_points, break_connections = load_break_points(sample_dir)
-                if break_points or break_connections:
-                    _break_kwargs = dict(
-                        break_points=break_points,
-                        break_connections=break_connections,
-                        break_point_size=300,
-                        legend_fontsize=14,
-                    )
-                    OverlayRenderer.visualize_grid_2d_with_rays(
-                        output_file=os.path.join(
-                            sample_dir, "summary_total_with_breaking_points.png"
-                        ),
-                        **_break_kwargs,
-                        **_ray_kwargs,
-                    )
-                    OverlayRenderer.visualize_grid_2d_with_rays(
-                        output_file=os.path.join(
-                            sample_dir,
-                            "summary_peaks_only_with_breaking_points.png",
-                        ),
-                        show_measured_points=False,
-                        **_break_kwargs,
-                        **_ray_kwargs,
-                    )
 
     # ------------------------------------------------------------------
     # Ray processing helper  (replaces process_and_plot + dqd_processor)

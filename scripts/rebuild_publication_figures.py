@@ -5,11 +5,8 @@ that have ALREADY been simulated, without re-running the sweeps.
 Produces, per sample:
     summary_total_all_crosses.png                  (all sweep-start crosses,
                                                     one colour, large, legended)
-    summary_total_with_breaking_points.png          (summary_total + break points)
-    summary_peaks_only_with_breaking_points.png     (summary_peaks_only + break pts)
 
-The existing summary_total.png / summary_peaks_only.png / summary_with_interdot.png
-are left untouched.
+The existing summary_total.png / summary_peaks_only.png are left untouched.
 
 Usage
 -----
@@ -30,7 +27,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "src"))
 
 from dqd.visualization.overlay import OverlayRenderer          # noqa: E402
-from dqd.analysis.interdot_simple import load_break_points   # noqa: E402
 
 # Same styling the pipeline uses for the publication figures.
 CROSS_KWARGS = dict(
@@ -87,32 +83,6 @@ def rebuild_sample(sample_dir: str) -> bool:
     OverlayRenderer.visualize_grid_2d_with_rays(
         output_file=os.path.join(sample_dir, "summary_total_all_crosses.png"),
         **CROSS_KWARGS, **ray_kwargs,
-    )
-
-    # Break points come from the per-peak slope test during the run and are
-    # saved in break_points.txt.  They cannot be reconstructed afterwards from
-    # a finished sample, so a sample without that file simply skips these
-    # figures — re-run the pipeline to produce it.
-    break_points, break_connections = load_break_points(sample_dir)
-
-    if not break_points and not break_connections:
-        print(f"[warn] {sample_dir}: no break points — "
-              f"*_with_breaking_points figures skipped")
-        return True
-
-    break_kwargs = dict(break_points=break_points,
-                        break_connections=break_connections,
-                        break_point_size=300,
-                        legend_fontsize=14)
-    OverlayRenderer.visualize_grid_2d_with_rays(
-        output_file=os.path.join(sample_dir,
-                                 "summary_total_with_breaking_points.png"),
-        **break_kwargs, **ray_kwargs,
-    )
-    OverlayRenderer.visualize_grid_2d_with_rays(
-        output_file=os.path.join(sample_dir,
-                                 "summary_peaks_only_with_breaking_points.png"),
-        show_measured_points=False, **break_kwargs, **ray_kwargs,
     )
     return True
 
