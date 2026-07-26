@@ -8,7 +8,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from ..config.axis_labels import x_label, y_label
+from ..config.figure_style import (
+    apply_voltage_axes,
+    new_map_figure,
+    save_figure,
+)
 
 
 class OverlayRenderer:
@@ -107,7 +111,7 @@ class OverlayRenderer:
             f"from {voltage_coords_file}"
         )
 
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax, cax = new_map_figure(with_colorbar=True)
         im = ax.imshow(
             z_2d,
             extent=extent,
@@ -127,17 +131,13 @@ class OverlayRenderer:
             ax.scatter(pk[:, 0], pk[:, 1], marker="x", color="red", s=50,
                        linewidths=1, label="Peaks")
 
-        ax.set_xlabel(x_label())
-        ax.set_ylabel(y_label())
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
+        apply_voltage_axes(ax, extent[0], extent[1], extent[2], extent[3])
         ax.legend(loc="upper right")
-        plt.colorbar(
-            im, ax=ax,
+        fig.colorbar(
+            im, cax=cax,
             label="Current (nA)" if is_double_dot else "Sensor Signal",
         )
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, output_file)
         print(f"Highlighted charge-sensor image saved to: {output_file}")
 
     # ------------------------------------------------------------------
@@ -179,7 +179,7 @@ class OverlayRenderer:
         Vy_values = np.unique(Vy_flat)
         z_2d = z_flat.reshape((len(Vy_values), len(Vx_values)))
 
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax, cax = new_map_figure(with_colorbar=True)
         im = ax.imshow(
             z_2d,
             extent=[vxmin, vxmax, vymin, vymax],
@@ -187,11 +187,7 @@ class OverlayRenderer:
             aspect="auto",
             cmap="hot",
         )
-        ax.set_xlabel(x_label())
-        ax.set_ylabel(y_label())
-        ax.set_xlim(vxmin, vxmax)
-        ax.set_ylim(vymin, vymax)
-        ax.set_aspect("equal")
+        apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax)
 
         color_cycle = plt.cm.tab10(np.linspace(0, 1, len(angles)))
         for i, angle in enumerate(angles):
@@ -207,13 +203,9 @@ class OverlayRenderer:
                 )
 
         cbar_label = "Sensor Signal" if not is_double_dot else "Occupation (binary)"
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.08)
-        plt.colorbar(im, cax=cax, label=cbar_label)
+        fig.colorbar(im, cax=cax, label=cbar_label)
         ax.legend(loc="upper right")
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, output_file)
         print(f"[All Rays Overlay] Saved combined plot to: {output_file}")
 
     # ------------------------------------------------------------------
@@ -287,7 +279,7 @@ class OverlayRenderer:
         z_2d = z_flat.reshape((len(Vy_values), len(Vx_values)))
         extent = [Vx_values[0], Vx_values[-1], Vy_values[0], Vy_values[-1]]
 
-        fig, ax = plt.subplots(figsize=(10, 8))
+        fig, ax, cax = new_map_figure(with_colorbar=True)
         im = ax.imshow(
             z_2d, extent=extent, origin="lower", aspect="auto",
             cmap=cmap, vmin=vmin, vmax=vmax,
@@ -302,14 +294,10 @@ class OverlayRenderer:
             ax.scatter(pa[:, 0], pa[:, 1], marker="x", color="red",
                        s=40, label="All Detected Peaks")
 
-        ax.set_xlabel(x_label())
-        ax.set_ylabel(y_label())
-        ax.set_xlim(extent[0], extent[1])
-        ax.set_ylim(extent[2], extent[3])
+        apply_voltage_axes(ax, extent[0], extent[1], extent[2], extent[3])
         ax.legend(loc="upper right")
-        plt.colorbar(im, ax=ax, label=cbar_label)
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
-        plt.close()
+        fig.colorbar(im, cax=cax, label=cbar_label)
+        save_figure(fig, output_file)
         print(
             f"[highlight_all_scanned_and_peaks_in_sample] Saved overlay to: {output_file}"
         )
@@ -516,25 +504,20 @@ class OverlayRenderer:
                 ys.append(vymin + (row + 0.5) * cell_width_y)
             return xs, ys
 
-        plt.figure(figsize=(10, 10))
-        plt.pcolormesh(x_edges, y_edges, data, cmap="gray_r",
-                       edgecolors="k", linewidth=0.5)
+        fig, ax, _ = new_map_figure()
+        ax.pcolormesh(x_edges, y_edges, data, cmap="gray_r",
+                      edgecolors="k", linewidth=0.5)
 
         if scanned:
             xs, ys = _to_centers(scanned)
-            plt.scatter(xs, ys, color="blue", s=10, alpha=0.5, label="Measured Points")
+            ax.scatter(xs, ys, color="blue", s=10, alpha=0.5, label="Measured Points")
         if peaks:
             xs, ys = _to_centers(peaks)
-            plt.scatter(xs, ys, color="red", s=50, marker="x", linewidths=1, label="Detected Transitions")
+            ax.scatter(xs, ys, color="red", s=50, marker="x", linewidths=1, label="Detected Transitions")
 
-        plt.xlabel(x_label())
-        plt.ylabel(y_label())
-        plt.xlim(vxmin, vxmax)
-        plt.ylim(vymin, vymax)
-        plt.gca().set_aspect("equal")
-        plt.legend()
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
-        plt.close()
+        apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax)
+        ax.legend()
+        save_figure(fig, output_file)
 
     # ------------------------------------------------------------------
     # Combined sweeping + rays summary  (summary_total.png)
@@ -617,7 +600,7 @@ class OverlayRenderer:
                 ys.append(vymin + (row + 0.5) * cell_width_y)
             return xs, ys
 
-        fig, ax = plt.subplots(figsize=(12, 12))
+        fig, ax, _ = new_map_figure()
         ax.pcolormesh(x_edges, y_edges, data, cmap="gray_r",
                       edgecolors="k", linewidth=0.5)
 
@@ -686,11 +669,7 @@ class OverlayRenderer:
                        facecolors="orange", edgecolors="black", linewidths=1.2,
                        zorder=9, label="Break Points")
 
-        ax.set_xlabel(x_label())
-        ax.set_ylabel(y_label())
-        ax.set_xlim(vxmin, vxmax)
-        ax.set_ylim(vymin, vymax)
-        ax.set_aspect("equal")
+        apply_voltage_axes(ax, vxmin, vxmax, vymin, vymax)
 
         from matplotlib.patches import Patch
         transition_patch = Patch(facecolor="black", edgecolor="black",
@@ -700,8 +679,7 @@ class OverlayRenderer:
                   labels=["Transition Lines (Ground Truth)"] + labels,
                   loc="upper right", fontsize=legend_fontsize)
 
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
-        plt.close()
+        save_figure(fig, output_file)
         print(f"[summary_total] Saved to: {output_file}")
 
     # ------------------------------------------------------------------

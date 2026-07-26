@@ -37,7 +37,7 @@ def main():
         vy_max=1.0,
 
         # ── Peak processing ───────────────────────────────────────────
-        crop_size=0.5,
+        crop_size=1,
         col_buffer=2,
 
         # ── Simulator physics ─────────────────────────────────────────

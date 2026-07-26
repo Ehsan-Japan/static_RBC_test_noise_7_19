@@ -6,3 +6,14 @@ from .axis_labels import (
     x_label,
     y_label,
 )
+from .figure_style import (
+    FigureStyle,
+    apply_voltage_axes,
+    figure_dpi,
+    figure_size,
+    get_figure_style,
+    new_figure,
+    new_map_figure,
+    save_figure,
+    set_figure_style,
+)
