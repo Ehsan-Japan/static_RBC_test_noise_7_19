@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from typing import Dict, List, Optional, Tuple
 
+from ..config.figure_style import draw_ground_truth_map
+
 
 _GIF_WRITER: Optional[str] = None
 
@@ -143,8 +145,12 @@ class PeakDetector:
             if hyperparams.get("save_gifs", self.save_gifs):
                 gif_path = os.path.join(self.output_dir, f"peak_sweep_{name}.gif")
                 try:
-                    self._animate(current_2d, states, gif_path,
-                                  dpi=hyperparams.get("gif_dpi", self.gif_dpi))
+                    self._animate(
+                        current_2d, states, gif_path,
+                        dpi=hyperparams.get("gif_dpi", self.gif_dpi),
+                        background=hyperparams.get("gif_background"),
+                        offset=hyperparams.get("gif_offset", (0, 0)),
+                    )
                     sr["outputs"]["animation"] = gif_path
                 except Exception as e:
                     print(f"Warning: GIF animation failed for {name} ({e}). Skipping.")
@@ -385,14 +391,41 @@ class PeakDetector:
     # as soon as the crop is more than ~15 cells wide.
     _GIF_MAX_TICKS = 10
 
-    def _animate(self, current_2d, states, out_path, dpi: Optional[int] = None):
-        fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
-        # No colorbar: the sweep animation is about WHERE the scan is, not the
-        # absolute sensor value.
-        ax.imshow(current_2d, cmap="hot", origin="lower", aspect="auto")
-        ax.set_title("Row-major Peak Sweep")
+    def _animate(self, current_2d, states, out_path, dpi: Optional[int] = None,
+                 background=None, offset=(0, 0)):
+        """
+        Animate the row-major sweep.
 
-        num_rows, num_cols = current_2d.shape
+        background : full-grid binary ground-truth map (the same array as
+                     binary_no_overlay.png / the stability diagram).  When
+                     given, the sweep is drawn on the WHOLE stability diagram
+                     instead of the little crop, so you can see where in the
+                     honeycomb the scan is happening.
+        offset     : (row_offset, col_offset) that maps a cropped index onto
+                     that full grid — the sweep states are in crop coordinates.
+        """
+        fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
+        r_off, c_off = offset
+
+        if background is not None:
+            # Same house style as binary_no_overlay.png: white background,
+            # black transition cells, visible cell grid.
+            num_rows, num_cols = background.shape
+            edges_x = np.arange(num_cols + 1) - 0.5
+            edges_y = np.arange(num_rows + 1) - 0.5
+            draw_ground_truth_map(ax, edges_x, edges_y, background)
+            # Outline the crop the sweep is confined to.
+            crop_rows, crop_cols = current_2d.shape
+            ax.add_patch(plt.Rectangle(
+                (c_off - 0.5, r_off - 0.5), crop_cols, crop_rows,
+                fill=False, edgecolor="tab:orange", lw=2, zorder=5,
+            ))
+        else:
+            # No colorbar: the sweep animation is about WHERE the scan is, not
+            # the absolute sensor value.
+            num_rows, num_cols = current_2d.shape
+            ax.imshow(current_2d, cmap="hot", origin="lower", aspect="auto")
+        ax.set_title("Row-major Peak Sweep")
 
         def _ticks(n):
             """At most _GIF_MAX_TICKS evenly spaced cell indices (0-based)."""
@@ -406,10 +439,12 @@ class PeakDetector:
         ax.set_yticklabels(yt + 1)
         ax.set_xlim(-0.5, num_cols - 0.5)
         ax.set_ylim(-0.5, num_rows - 0.5)
+        ax.set_aspect("equal", adjustable="box")
 
-        row_line, = ax.plot([], [], "r-", lw=1)
-        scanned_sc, = ax.plot([], [], "ko", ms=3)
-        peak_sc, = ax.plot([], [], "ro", ms=6)
+        # Marker colours match every other figure in the set.
+        row_line, = ax.plot([], [], "-", color="red", lw=1, zorder=6)
+        scanned_sc, = ax.plot([], [], "o", color="blue", ms=3, alpha=0.6, zorder=7)
+        peak_sc, = ax.plot([], [], "x", color="red", ms=9, mew=2, zorder=8)
 
         def init():
             row_line.set_data([], [])
@@ -420,10 +455,15 @@ class PeakDetector:
         def update(frame):
             s = states[frame]
             r, cols, pcol = s["row"], s["scanned_cols"], s["peak_col"]
-            row_line.set_data([0, current_2d.shape[1] - 1], [r, r])
-            scanned_sc.set_data(cols, [r] * len(cols))
-            peak_sc.set_data([pcol] if pcol is not None else [], [r] if pcol is not None else [])
-            ax.set_title(f"Row={r}, peak col={pcol}")
+            gr = r + r_off                                   # onto the full grid
+            gcols = [c + c_off for c in cols]
+            gpcol = None if pcol is None else pcol + c_off
+            row_line.set_data([0, num_cols - 1], [gr, gr])
+            scanned_sc.set_data(gcols, [gr] * len(gcols))
+            peak_sc.set_data([gpcol] if gpcol is not None else [],
+                             [gr] if gpcol is not None else [])
+            ax.set_title(f"Row={gr + 1}, peak col="
+                         f"{'-' if gpcol is None else gpcol + 1}")
             return row_line, scanned_sc, peak_sc
 
         try:

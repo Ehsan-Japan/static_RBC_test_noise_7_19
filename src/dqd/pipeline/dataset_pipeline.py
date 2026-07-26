@@ -617,6 +617,15 @@ class DatasetPipeline:
             use_double_dot=True,
         )
 
+        # Full-grid ground-truth map used as the GIF background (skipped when
+        # GIFs are off, since loading and thresholding it is pure waste then).
+        gif_background = None
+        if self.save_gifs and os.path.isfile(double_dot_path):
+            dd = np.load(double_dot_path)
+            dd_nx = len(np.unique(dd[:, 0]))
+            dd_ny = len(np.unique(dd[:, 1]))
+            gif_background = (dd[:, 2].reshape(dd_ny, dd_nx) > 0.5).astype(int)
+
         # Sweep analysis
         analysis_params = {
             "sweeps": [
@@ -678,6 +687,12 @@ class DatasetPipeline:
             "save_plots": True,
             "save_gifs": self.save_gifs,
             "gif_dpi": self.gif_dpi,
+            # Draw the sweep on the WHOLE stability diagram (the same binary
+            # ground-truth map as binary_no_overlay.png) instead of the little
+            # crop, so the animation shows where in the honeycomb the scan is.
+            # The sweep states are in crop coordinates, hence the offset.
+            "gif_background": gif_background,
+            "gif_offset": (center_i - local_i, center_j - local_j),
             "save_txt": True,
             "start_pixel_x": local_i,
             "start_pixel_y": local_j,
