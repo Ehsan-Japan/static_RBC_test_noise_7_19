@@ -28,12 +28,17 @@ def main():
         # at the same place inside it, so all figures have the same physical
         # size and the same data scale — they can be compared or placed side
         # by side in the paper without rescaling.  Pixel size = size x dpi
-        # (6.0 in x 300 dpi = 1800 px).  Panel figures widen per panel.
-        figure_width_in=6.0,
-        figure_height_in=6.0,
+        # (12 in x 300 dpi = 3600 px).  Panel figures widen per panel.
+        #
+        # 12 x 12 is what summary_total.png / summary_peaks_only.png always
+        # used.  SHRINKING THIS DOES NOT SHRINK THE CONTENTS: legend text,
+        # tick labels and markers are sized in points, so a smaller canvas
+        # only makes them look bigger relative to the frame.
+        figure_width_in=12.0,
+        figure_height_in=12.0,
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=34,
+        n_samples=45,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,

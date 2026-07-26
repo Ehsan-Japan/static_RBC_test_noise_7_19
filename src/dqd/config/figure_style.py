@@ -39,8 +39,13 @@ from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 
-DEFAULT_WIDTH_IN = 6.0
-DEFAULT_HEIGHT_IN = 6.0
+# 12 x 12 in matches what summary_total.png / summary_peaks_only.png always
+# used.  Do NOT shrink it: fonts, legends and markers are sized in POINTS,
+# so a smaller canvas does not scale them down -- it makes them look huge
+# relative to the frame.  Changing this value changes how big the legend and
+# the markers appear in every image.
+DEFAULT_WIDTH_IN = 12.0
+DEFAULT_HEIGHT_IN = 12.0
 DEFAULT_DPI = 300
 
 # Plotting box inside the canvas, as (left, bottom, width, height) fractions.
@@ -52,8 +57,10 @@ DEFAULT_DPI = 300
 # INCHES: with equal aspect and equal vx / vy ranges the x axis and the y
 # axis then have the same physical length.  (imshow's default aspect="auto"
 # is what used to stretch the stability diagram into a wide rectangle.)
-AXES_RECT = (0.150, 0.150, 0.700, 0.700)
-CBAR_RECT = (0.870, 0.150, 0.030, 0.700)
+# The box is as large as the old default-plus-tight-crop layout, so the data
+# fills the same fraction of the image as it did before.
+AXES_RECT = (0.100, 0.100, 0.750, 0.750)
+CBAR_RECT = (0.870, 0.100, 0.025, 0.750)
 
 
 @dataclass

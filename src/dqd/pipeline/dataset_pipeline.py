@@ -96,8 +96,8 @@ class DatasetPipeline:
         x_axis_unit: str = "mV",
         y_axis_unit: str = "mV",
         # ── Figure geometry (shared by every saved figure) ────────────
-        figure_width_in: float = 6.0,
-        figure_height_in: float = 6.0,
+        figure_width_in: float = 12.0,
+        figure_height_in: float = 12.0,
         # ── Evaluation hyperparameters ────────────────────────────────
         peak_neighbor_cols: int = 0,
         # ── Interdot break-point hyperparameters ──────────────────────
