@@ -1,22 +1,26 @@
 """
 interdot_simple.py — SIMPLE sample-level interdot transition detector.
 
-Runs AFTER the whole sweeping process is finished.  The idea (exactly the
-break-point method):
+Runs AFTER the whole sweeping process is finished:
 
-  1. Take every transition peak the sweeps found in the sample.
-  2. Group the peaks into lines (points close together = same dot-to-lead line).
-  3. Each line has two ends; those ends are the "break points" — the places
-     where a tracked line stops / its slope breaks at a honeycomb vertex.
-  4. Connect the two CLOSEST break points that belong to DIFFERENT lines.
-     That short gap between two lines is where an interdot transition sits.
-  5. Scan the charge-sensor GRADIENT along that connecting segment and take
+  1. Break points come from the SWEEPS themselves.  Each peak is swept twice —
+     once walking up the transition line, once walking down — and each sweep
+     traces out a slope.  If the two slopes differ by more than
+     `min_slope_change`, the line bends at that peak: it is a honeycomb vertex,
+     i.e. a break point.  (See :func:`slope_difference`, called per peak by
+     DatasetPipeline.)
+  2. Connect the two CLOSEST break points.  That short gap between two
+     dot-to-lead lines is where an interdot transition sits.
+  3. Scan the charge-sensor GRADIENT along that connecting segment and take
      the strongest point as the interdot peak.  (Interdot lines are almost
      invisible in the raw sensor amplitude but show up clearly in the
      gradient, which is why the amplitude-based row sweeps miss them.)
 
-This module is intentionally small and self-contained.  It does not touch the
-existing sweep pipeline; it only post-processes its results.
+Earlier versions found break points by clustering all the sweep peaks into
+lines and hunting for a kink along each one.  That needed four hyperparameters
+(neighbour radius, kink window, window cap, min line points) and two extra
+sweeps per peak.  Using the slopes the sweeps already produce needs none of
+them.
 """
 import os
 import re
@@ -24,7 +28,9 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+MIN_SLOPE_POINTS = 3   # peaks a sweep needs before its slope means anything
 
 from ..config.figure_style import (
     apply_voltage_axes,
@@ -37,6 +43,35 @@ from ..config.figure_style import (
 # Public entry point
 # ----------------------------------------------------------------------
 
+def slope_difference(sweep_results: Dict) -> Optional[float]:
+    """
+    |slope_up - slope_down| for one peak, or None if it cannot be measured.
+
+    Each sweep tracks the transition line away from the peak and records one
+    peak column per row.  A straight line gives both sweeps the same slope; a
+    honeycomb vertex bends it, so the two disagree.  That disagreement is the
+    break-point test.
+
+    Slope is dcol/drow in grid-pixel units, from a least-squares fit over the
+    cells the sweep actually locked onto.  A sweep that found fewer than
+    MIN_SLOPE_POINTS peaks, or never moved off one row, has no measurable
+    slope and the peak is skipped.
+    """
+    slopes = []
+    for sr in sweep_results.values():
+        pts = [(r, c) for r, c in sr.get("peaks", []) if c is not None]
+        if len(pts) < MIN_SLOPE_POINTS:
+            continue
+        rows = np.array([p[0] for p in pts], dtype=float)
+        cols = np.array([p[1] for p in pts], dtype=float)
+        if np.ptp(rows) == 0:
+            continue
+        slopes.append(float(np.polyfit(rows, cols, 1)[0]))
+    if len(slopes) < 2:
+        return None
+    return abs(slopes[0] - slopes[1])
+
+
 def detect_interdot(
     sample_dir: str,
     charge_sensing_path: str,
@@ -44,49 +79,32 @@ def detect_interdot(
     vx_max: float,
     vy_min: float,
     vy_max: float,
-    neighbor_px: int = 4,
+    break_points: Optional[List[Tuple[int, int]]] = None,
     connect_px: int = 50,
-    min_slope_change: float = 0.8,
-    kink_window_frac: float = 1.0 / 6.0,
-    kink_window_max: int = 0,
-    min_line_pts: int = 5,
 ) -> List[Tuple[float, float]]:
     """
-    Detect interdot transition peaks for one sample and save results.
+    Connect break points and locate the interdot transition between them.
 
     Parameters
     ----------
     sample_dir          : the sample folder (…/sample_i)
     charge_sensing_path : path to charge_sensing_data.npy  [Vx, Vy, z]
     vx_min/max, vy_min/max : voltage extent (for plotting)
-    neighbor_px         : two peaks this close (grid pixels) are the same line.
-                          Smaller keeps nearly-touching lines separate (more
-                          break-point pairs survive the "different line" rule);
-                          larger merges thick/broken bands into one line.
-    connect_px          : max gap between break points of different lines
-    min_slope_change    : a line only yields a break point if its local slope
-                          changes by more than this (grid-pixel slope units).
-                          THE dominant reason break points go undetected —
-                          shallow honeycomb vertices change the slope by only
-                          ~0.3-0.6 and are silently rejected at 0.8.
-    kink_window_frac    : slope-comparison half-window as a fraction of the
-                          line length.  Bigger = more smoothing = kinks on
-                          long lines get straightened away.
-    kink_window_max     : hard cap on that half-window in pixels (0 = no cap).
-                          Capping it keeps long lines as kink-sensitive as
-                          short ones.
-    min_line_pts        : a group needs at least this many points (and this
-                          many distinct steps along its long axis) to be
-                          considered a line at all.
+    break_points        : (row, col) grid cells flagged as break points by the
+                          per-peak slope test.  Supplied by DatasetPipeline.
+    connect_px          : max gap, in grid pixels, between two break points for
+                          them to be connected
 
     Returns
     -------
-    List of (vx, vy) interdot peaks.  Also writes:
-       interdot_transitions.txt   and   summary_with_interdot.png
+    List of (vx, vy) interdot peaks.  Also writes interdot_transitions.txt,
+    break_points.txt, cropped_results/interdot_peaks/voltage_coordinates.txt
+    and summary_with_interdot.png.
     """
-    peaks_v = _load_sample_peaks(sample_dir)
-    if len(peaks_v) < 2:
-        print("[interdot_simple] not enough peaks — skipping.")
+    break_points = list(break_points or [])
+    if len(break_points) < 2:
+        print(f"[interdot_simple] {len(break_points)} break point(s) — "
+              "need at least 2 to connect; skipping.")
         return []
 
     # --- load the sensor grid and its gradient magnitude ---
@@ -98,25 +116,14 @@ def detect_interdot(
     grad = np.hypot(gx, gy)                       # strong on every transition line
     m, n = current_2d.shape
 
-    # --- voltage -> grid (row, col), de-duplicated ---
-    grid_peaks = list({_to_grid(vx, vy, ux, uy) for vx, vy in peaks_v})
+    # Every break point comes from a different peak, so each gets its own id
+    # and any two of them may be connected.
+    break_pts = list(enumerate(break_points))
 
-    # --- 2. group peaks into lines ---
-    lines = _group_lines(grid_peaks, neighbor_px)
-
-    # --- 3. break points = the two far ends of every line ---
-    break_pts = _break_points(                    # list of (line_id, (row, col))
-        lines,
-        min_slope_change=min_slope_change,
-        kink_window_frac=kink_window_frac,
-        kink_window_max=kink_window_max,
-        min_line_pts=min_line_pts,
-    )
-
-    # --- 4. connect closest break points from different lines ---
+    # --- connect the closest break points ---
     connections = _connect(break_pts, connect_px)
 
-    # --- 5. scan the gradient along each connection, keep the strongest cell ---
+    # --- scan the gradient along each connection, keep the strongest cell ---
     interdot_grid: List[Tuple[int, int]] = []
     for (r1, c1), (r2, c2) in connections:
         steps = max(abs(r2 - r1), abs(c2 - c1), 1) * 2 + 1
@@ -129,11 +136,11 @@ def detect_interdot(
         interdot_grid.append(best)
 
     interdot_v = [_to_voltage(r, c, ux, uy) for r, c in interdot_grid]
-    print(f"[interdot_simple] {len(lines)} lines -> "
-          f"{len(break_pts)} break points -> "
+    print(f"[interdot_simple] {len(break_pts)} break points -> "
           f"{len(connections)} connections -> "
           f"{len(interdot_v)} interdot peaks")
 
+    peaks_v = _load_sample_peaks(sample_dir)        # for the plot only
     _write_txt(sample_dir, interdot_v)              # tracking log (sample level)
     _write_voltage_coords(sample_dir, interdot_v)   # feeds images + evaluation
     _write_break_points(                            # feeds the *_with_breaking_points images
@@ -148,94 +155,7 @@ def detect_interdot(
 
 
 # ----------------------------------------------------------------------
-# Step 2 — group peaks into lines (union-find on pixel distance)
-# ----------------------------------------------------------------------
-
-def _group_lines(
-    grid_peaks: List[Tuple[int, int]], neighbor_px: int
-) -> List[List[Tuple[int, int]]]:
-    parent = list(range(len(grid_peaks)))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    pts = np.array(grid_peaks, dtype=float)
-    for i in range(len(pts)):
-        for j in range(i + 1, len(pts)):
-            if np.hypot(*(pts[i] - pts[j])) <= neighbor_px:
-                parent[find(i)] = find(j)
-
-    groups: dict = {}
-    for i, pk in enumerate(grid_peaks):
-        groups.setdefault(find(i), []).append(pk)
-    return list(groups.values())
-
-
-# ----------------------------------------------------------------------
-# Step 3 — break points: the kink of each line (where its slope changes)
-# ----------------------------------------------------------------------
-
-def _break_points(
-    lines: List[List[Tuple[int, int]]],
-    min_slope_change: float = 0.8,
-    kink_window_frac: float = 1.0 / 6.0,
-    kink_window_max: int = 0,
-    min_line_pts: int = 5,
-) -> List[Tuple[int, Tuple[int, int]]]:
-    """
-    One break point per line: the peak where the line's local slope changes
-    the most (a honeycomb vertex).  Lines that are essentially straight
-    (no slope change above min_slope_change) contribute no break point.
-    """
-    breaks: List[Tuple[int, Tuple[int, int]]] = []
-    for line_id, line in enumerate(lines):
-        kink = _line_kink(line, min_slope_change,
-                          kink_window_frac, kink_window_max, min_line_pts)
-        if kink is not None:
-            breaks.append((line_id, kink))
-    return breaks
-
-
-def _line_kink(line, min_slope_change,
-               kink_window_frac=1.0 / 6.0, kink_window_max=0, min_line_pts=5):
-    """Return the (row, col) where the line bends the most, or None."""
-    pts = np.array(line, dtype=float)
-    if len(pts) < min_line_pts:
-        return None
-
-    # Track the line along whichever axis it spans more (row or col),
-    # collapsing the thick band to one value per step (its mean).
-    key, val = (0, 1) if np.ptp(pts[:, 0]) >= np.ptp(pts[:, 1]) else (1, 0)
-    uk = np.unique(pts[:, key])
-    if len(uk) < min_line_pts:
-        return None
-    tv = np.array([pts[pts[:, key] == u, val].mean() for u in uk])
-
-    # Compare the slope a window before vs a window after each interior point;
-    # the largest change in slope is the kink.
-    w = max(1, int(len(uk) * kink_window_frac))
-    if kink_window_max > 0:
-        w = min(w, kink_window_max)
-    best = None
-    for i in range(w, len(uk) - w):
-        s_before = (tv[i] - tv[i - w]) / (uk[i] - uk[i - w] + 1e-9)
-        s_after = (tv[i + w] - tv[i]) / (uk[i + w] - uk[i] + 1e-9)
-        change = abs(s_after - s_before)
-        if change > min_slope_change and (best is None or change > best[0]):
-            best = (change, i)
-    if best is None:
-        return None
-
-    i = best[1]
-    return ((int(round(uk[i])), int(round(tv[i]))) if key == 0
-            else (int(round(tv[i])), int(round(uk[i]))))
-
-
-# ----------------------------------------------------------------------
-# Step 4 — connect the closest break points of different lines
+# Connect the closest break points
 # ----------------------------------------------------------------------
 
 def _connect(

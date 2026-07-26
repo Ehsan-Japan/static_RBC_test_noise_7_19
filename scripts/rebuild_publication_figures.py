@@ -30,10 +30,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "src"))
 
 from dqd.visualization.overlay import OverlayRenderer          # noqa: E402
-from dqd.analysis.interdot_simple import (                     # noqa: E402
-    detect_interdot,
-    load_break_points,
-)
+from dqd.analysis.interdot_simple import load_break_points   # noqa: E402
 
 # Same styling the pipeline uses for the publication figures.
 CROSS_KWARGS = dict(
@@ -45,25 +42,6 @@ CROSS_KWARGS = dict(
     ray_peak_label="Directional Sweep Start Points",
     legend_fontsize=14,
 )
-
-
-def _interdot_params_from_dataset_name(dataset_dir: str) -> dict:
-    """
-    The dataset folder name encodes the interdot settings, e.g.
-    ..._nb_4_cx_50_sl_0.8_wf_0.167_wm_0_mlp_5.  Fall back to the detector
-    defaults for anything that is missing.
-    """
-    name = os.path.basename(dataset_dir.rstrip("/\\"))
-    keys = {"nb": "neighbor_px", "cx": "connect_px", "sl": "min_slope_change",
-            "wf": "kink_window_frac", "wm": "kink_window_max",
-            "mlp": "min_line_pts"}
-    ints = {"neighbor_px", "connect_px", "kink_window_max", "min_line_pts"}
-    out = {}
-    for tag, kw in keys.items():
-        m = re.search(rf"_{tag}_([0-9.]+)", name)
-        if m:
-            out[kw] = int(float(m.group(1))) if kw in ints else float(m.group(1))
-    return out
 
 
 def _load_rays(sample_dir: str, angles) -> dict:
@@ -111,19 +89,11 @@ def rebuild_sample(sample_dir: str) -> bool:
         **CROSS_KWARGS, **ray_kwargs,
     )
 
-    # Break points: reuse break_points.txt if the sample already has one,
-    # otherwise re-run the (deterministic) break-point detection to create it.
+    # Break points come from the per-peak slope test during the run and are
+    # saved in break_points.txt.  They cannot be reconstructed afterwards from
+    # a finished sample, so a sample without that file simply skips these
+    # figures — re-run the pipeline to produce it.
     break_points, break_connections = load_break_points(sample_dir)
-    if not break_points and not break_connections:
-        detect_interdot(
-            sample_dir=sample_dir,
-            charge_sensing_path=os.path.join(sample_dir, "numpy", "simulation",
-                                             "charge_sensing_data.npy"),
-            vx_min=vs["vx_min"], vx_max=vs["vx_max"],
-            vy_min=vs["vy_min"], vy_max=vs["vy_max"],
-            **_interdot_params_from_dataset_name(os.path.dirname(sample_dir)),
-        )
-        break_points, break_connections = load_break_points(sample_dir)
 
     if not break_points and not break_connections:
         print(f"[warn] {sample_dir}: no break points — "

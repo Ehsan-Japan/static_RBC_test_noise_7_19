@@ -163,29 +163,22 @@ class PeakDetector:
             results["sweeps"][name] = sr
             results["output_files"].extend(list(sr["outputs"].values()))
 
-        # ------------------------------------------------------------------
-        # Post-processing: interdot transitions via break-point connection
-        #
-        # Each sweep trajectory has a "break point" — the last grid cell where
-        # it successfully tracked a transition line before losing it.  At a
-        # honeycomb vertex two different sweep families both lose their line at
-        # nearby locations.  Connecting the nearest pair of break points gives
-        # the interdot transition segment; scanning along it finds its peak.
-        # ------------------------------------------------------------------
-        interdot_threshold = hyperparams.get(
-            "interdot_threshold_px", col_buffer * 4
-        )
-        interdot_peaks = self._find_interdot_by_breakpoints(
-            current_2d, results["sweeps"], threshold_px=interdot_threshold
-        )
-        results["interdot_peaks"] = interdot_peaks
-
-        if interdot_peaks and hyperparams.get("save_txt", self.save_txt):
-            txt_path = os.path.join(
-                self.output_dir, "sweep_params_interdot_connections.txt"
-            )
-            self._save_interdot_txt(interdot_peaks, current_2d, txt_path)
-            results["output_files"].append(txt_path)
+        # One extra GIF with every sweep of this peak running together, so the
+        # way the four of them combine to cover the peak is visible at a glance.
+        if hyperparams.get("save_gifs", self.save_gifs):
+            combined_path = os.path.join(self.output_dir, "peak_sweep_ALL.gif")
+            try:
+                self._animate_combined(
+                    current_2d,
+                    [(n, results["sweeps"][n]["states"]) for n in results["sweeps"]],
+                    combined_path,
+                    dpi=hyperparams.get("gif_dpi", self.gif_dpi),
+                    background=hyperparams.get("gif_background"),
+                    offset=hyperparams.get("gif_offset", (0, 0)),
+                )
+                results["output_files"].append(combined_path)
+            except Exception as e:
+                print(f"Warning: combined GIF failed ({e}). Skipping.")
 
         return results
 
@@ -261,127 +254,6 @@ class PeakDetector:
     # Interdot break-point detection (post-processing)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _find_interdot_by_breakpoints(
-        current_2d: np.ndarray,
-        sweep_results: Dict,
-        threshold_px: int = 12,
-    ) -> List[Tuple[int, int]]:
-        """
-        Connect 'break points' of different sweep trajectories to find
-        interdot transition lines.
-
-        A break point is the last grid cell (row, col) where a sweep
-        successfully tracked a transition line before losing it.  At a
-        honeycomb vertex, two different sweep families both terminate nearby;
-        the short segment between them is the interdot transition.
-
-        Algorithm
-        ---------
-        1. Extract the last valid (row, col) peak from each sweep.
-        2. Pair each break point with its nearest unmatched partner that is
-           within *threshold_px* pixels.
-        3. For each connected pair, sample points along the straight line
-           between them and return the grid cell with the maximum current as
-           the interdot peak.
-
-        Returns
-        -------
-        List of (row, col) integer tuples in grid coordinates.
-        """
-        # Step 1 — collect break points
-        break_pts: List[Tuple[str, int, int]] = []   # (sweep_name, row, col)
-        for name, sr in sweep_results.items():
-            last_valid = None
-            for r, c in sr["peaks"]:
-                if c is not None:
-                    last_valid = (int(r), int(c))
-            if last_valid is not None:
-                break_pts.append((name, last_valid[0], last_valid[1]))
-
-        if len(break_pts) < 2:
-            return []
-
-        m, n = current_2d.shape
-        interdot_peaks: List[Tuple[int, int]] = []
-        used: set = set()
-
-        # Step 2 — greedy nearest-neighbour pairing within threshold
-        for i in range(len(break_pts)):
-            if i in used:
-                continue
-            best_j, best_dist = None, float(threshold_px)
-            for j in range(len(break_pts)):
-                if j == i or j in used:
-                    continue
-                dr = break_pts[i][1] - break_pts[j][1]
-                dc = break_pts[i][2] - break_pts[j][2]
-                d = (dr ** 2 + dc ** 2) ** 0.5
-                if d < best_dist:
-                    best_dist = d
-                    best_j = j
-            if best_j is None:
-                continue
-
-            used.add(i)
-            used.add(best_j)
-
-            r1, c1 = break_pts[i][1], break_pts[i][2]
-            r2, c2 = break_pts[best_j][1], break_pts[best_j][2]
-
-            # Step 3 — scan along the connecting segment, find the peak
-            n_pts = max(abs(r2 - r1), abs(c2 - c1), 1) * 2 + 1
-            rows = np.round(np.linspace(r1, r2, n_pts)).astype(int)
-            cols = np.round(np.linspace(c1, c2, n_pts)).astype(int)
-            valid = [
-                (r, c) for r, c in zip(rows, cols)
-                if 0 <= r < m and 0 <= c < n
-            ]
-            if not valid:
-                continue
-            vals = [float(current_2d[r, c]) for r, c in valid]
-            peak_idx = int(np.argmax(vals))
-            interdot_peaks.append(valid[peak_idx])
-
-        return interdot_peaks
-
-    @staticmethod
-    def _save_interdot_txt(
-        interdot_peaks: List[Tuple[int, int]],
-        current_2d: np.ndarray,
-        filename: str,
-    ) -> None:
-        """
-        Write interdot peaks in the same sweep_params_*.txt format that
-        SummaryWriter consumes, so they appear in summary_local.txt and
-        subsequently in voltage_coordinates.txt and all overlays.
-        """
-        with open(filename, "w") as f:
-            f.write("Sweep Parameters and Results\n")
-            f.write("=" * 40 + "\n\n")
-            f.write("Sweep Configuration:\n")
-            f.write("-" * 40 + "\n")
-            f.write("Name: interdot_connections (break-point post-processing)\n\n")
-            f.write("Row-wise Measurement Details:\n")
-            f.write("-" * 40 + "\n")
-            for r, c in interdot_peaks:
-                try:
-                    val_str = f"{current_2d[r, c]:.3e}"
-                except IndexError:
-                    val_str = "Out of Bounds"
-                # Write as 1-based indices to match the format _parse_row_line expects
-                f.write(
-                    f"Row={r + 1}, scanned=[{c + 1}], peak={c + 1}, val={val_str}\n"
-                )
-            f.write("\nSummary Statistics:\n")
-            f.write("-" * 40 + "\n")
-            f.write(f"Total measured cells: {len(interdot_peaks)}\n")
-            f.write(
-                f"Valid peaks detected: {len(interdot_peaks)}/{len(interdot_peaks)}\n"
-            )
-            corrected = [(r + 1, c + 1) for r, c in interdot_peaks]
-            f.write(f"Peak coordinates: {corrected}\n")
-
     # ------------------------------------------------------------------
     # GIF animation
     # ------------------------------------------------------------------
@@ -390,6 +262,101 @@ class PeakDetector:
     # One tick per cell (the old behaviour) overlaps into an unreadable smear
     # as soon as the crop is more than ~15 cells wide.
     _GIF_MAX_TICKS = 10
+
+    # Colour per sweep in the combined animation, in sweep-config order.
+    _SWEEP_COLORS = ("tab:blue", "tab:green", "tab:orange", "tab:purple")
+
+    def _animate_combined(self, current_2d, sweeps, out_path,
+                          dpi: Optional[int] = None,
+                          background=None, offset=(0, 0)):
+        """
+        One animation with EVERY sweep of a peak advancing together, so you can
+        see how the four of them combine to cover the peak.
+
+        sweeps : ordered [(name, states), ...].  Sweeps are different lengths;
+                 a short one holds its final state while the others finish, so
+                 its tracked line stays on screen instead of vanishing.
+        """
+        sweeps = [(n, st) for n, st in sweeps if st]
+        if not sweeps:
+            return
+        n_frames = max(len(st) for _, st in sweeps)
+
+        fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)
+        r_off, c_off = offset
+
+        if background is not None:
+            num_rows, num_cols = background.shape
+            draw_ground_truth_map(ax, np.arange(num_cols + 1) - 0.5,
+                                  np.arange(num_rows + 1) - 0.5, background)
+            crop_rows, crop_cols = current_2d.shape
+            # Magenta dashed: not one of the sweep colours, so the crop
+            # outline is never confused with a sweep.
+            ax.add_patch(plt.Rectangle(
+                (c_off - 0.5, r_off - 0.5), crop_cols, crop_rows,
+                fill=False, edgecolor="magenta", ls="--", lw=2, zorder=5,
+            ))
+        else:
+            num_rows, num_cols = current_2d.shape
+            ax.imshow(current_2d, cmap="hot", origin="lower", aspect="auto")
+
+        def _ticks(n):
+            step = max(1, int(np.ceil(n / self._GIF_MAX_TICKS)))
+            return np.arange(0, n, step)
+
+        xt, yt = _ticks(num_cols), _ticks(num_rows)
+        ax.set_xticks(xt); ax.set_yticks(yt)
+        ax.set_xticklabels(xt + 1); ax.set_yticklabels(yt + 1)
+        ax.set_xlim(-0.5, num_cols - 0.5)
+        ax.set_ylim(-0.5, num_rows - 0.5)
+        ax.set_aspect("equal", adjustable="box")
+
+        artists = []
+        for i, (name, _) in enumerate(sweeps):
+            color = self._SWEEP_COLORS[i % len(self._SWEEP_COLORS)]
+            row_line, = ax.plot([], [], "-", color=color, lw=1, alpha=0.8,
+                                zorder=6, label=name)
+            scanned, = ax.plot([], [], "o", color=color, ms=2.5, alpha=0.5,
+                               zorder=7)
+            found, = ax.plot([], [], "x", color=color, ms=7, mew=1.8, zorder=8)
+            artists.append((row_line, scanned, found))
+
+        ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+
+        def init():
+            for row_line, scanned, found in artists:
+                row_line.set_data([], []); scanned.set_data([], [])
+                found.set_data([], [])
+            return [a for trio in artists for a in trio]
+
+        def update(frame):
+            for (name, states), (row_line, scanned, found) in zip(sweeps, artists):
+                k = min(frame, len(states) - 1)      # short sweeps hold their end
+                s = states[k]
+                gr = s["row"] + r_off
+                row_line.set_data([0, num_cols - 1], [gr, gr])
+                gcols = [c + c_off for c in s["scanned_cols"]]
+                scanned.set_data(gcols, [gr] * len(gcols))
+                # every peak this sweep has found so far — its tracked line
+                px = [st["peak_col"] + c_off for st in states[:k + 1]
+                      if st["peak_col"] is not None]
+                py = [st["row"] + r_off for st in states[:k + 1]
+                      if st["peak_col"] is not None]
+                found.set_data(px, py)
+            ax.set_title(f"All sweeps — frame {frame + 1}/{n_frames}")
+            return [a for trio in artists for a in trio]
+
+        try:
+            ani = animation.FuncAnimation(
+                fig, update, frames=n_frames, init_func=init,
+                interval=700, blit=False, repeat=False,
+            )
+            ani.save(out_path, writer=_gif_writer(), fps=1,
+                     dpi=dpi or self.gif_dpi)
+        except Exception as e:
+            print(f"Warning: combined GIF failed ({e}). Skipping.")
+        finally:
+            plt.close(fig)
 
     def _animate(self, current_2d, states, out_path, dpi: Optional[int] = None,
                  background=None, offset=(0, 0)):
@@ -416,9 +383,11 @@ class PeakDetector:
             draw_ground_truth_map(ax, edges_x, edges_y, background)
             # Outline the crop the sweep is confined to.
             crop_rows, crop_cols = current_2d.shape
+            # Magenta dashed: not one of the sweep colours, so the crop
+            # outline is never confused with a sweep.
             ax.add_patch(plt.Rectangle(
                 (c_off - 0.5, r_off - 0.5), crop_cols, crop_rows,
-                fill=False, edgecolor="tab:orange", lw=2, zorder=5,
+                fill=False, edgecolor="magenta", ls="--", lw=2, zorder=5,
             ))
         else:
             # No colorbar: the sweep animation is about WHERE the scan is, not

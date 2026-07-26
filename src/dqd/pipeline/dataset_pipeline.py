@@ -6,7 +6,7 @@ import os
 import json
 import shutil
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from ..config.capacitance_config import CapacitanceConfig
 from ..config.axis_labels import set_axis_labels, x_label, y_label
@@ -62,17 +62,11 @@ class DatasetPipeline:
     figure_height_in     : canvas height of every saved figure, in inches
 
     Interdot break-point hyperparameters (see analysis/interdot_simple.py):
-    interdot_neighbor_px      : peaks within this many grid pixels are treated
-                                as the same dot-to-lead line
-    interdot_connect_px       : max gap between break points of different lines
-    interdot_min_slope_change : minimum local slope change for a line to yield
-                                a break point (main sensitivity knob)
-    interdot_kink_window_frac : slope-comparison half-window as a fraction of
-                                line length (smoothing)
-    interdot_kink_window_max  : hard cap on that half-window, in pixels
-                                (0 = uncapped)
-    interdot_min_line_pts     : minimum points / steps for a group to count
-                                as a line
+    interdot_min_slope_change : a peak is a break point when the two sweeps
+                                starting there trace slopes differing by more
+                                than this (grid-pixel dcol/drow units)
+    interdot_connect_px       : max gap, in grid pixels, between two break
+                                points for them to be connected
     """
 
     def __init__(
@@ -108,12 +102,8 @@ class DatasetPipeline:
         # ── Evaluation hyperparameters ────────────────────────────────
         peak_neighbor_cols: int = 0,
         # ── Interdot break-point hyperparameters ──────────────────────
-        interdot_neighbor_px: int = 4,
         interdot_connect_px: int = 50,
         interdot_min_slope_change: float = 0.8,
-        interdot_kink_window_frac: float = 1.0 / 6.0,
-        interdot_kink_window_max: int = 0,
-        interdot_min_line_pts: int = 5,
     ):
         self.base_save_dir = base_save_dir
         self.n_samples = n_samples
@@ -157,12 +147,8 @@ class DatasetPipeline:
         )
         self.angles = np.linspace(0, 90, num_angles + 2)[1:-1]
         self.peak_neighbor_cols = peak_neighbor_cols
-        self.interdot_neighbor_px = interdot_neighbor_px
         self.interdot_connect_px = interdot_connect_px
         self.interdot_min_slope_change = interdot_min_slope_change
-        self.interdot_kink_window_frac = interdot_kink_window_frac
-        self.interdot_kink_window_max = interdot_kink_window_max
-        self.interdot_min_line_pts = interdot_min_line_pts
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -177,12 +163,8 @@ class DatasetPipeline:
             f"_image_res_{self.x_resolution}"
             # interdot break-point hyperparameters, so runs with different
             # settings land in different folders and stay comparable
-            f"_nb_{self.interdot_neighbor_px}"
             f"_cx_{self.interdot_connect_px}"
             f"_sl_{self.interdot_min_slope_change:g}"
-            f"_wf_{self.interdot_kink_window_frac:.3g}"
-            f"_wm_{self.interdot_kink_window_max}"
-            f"_mlp_{self.interdot_min_line_pts}"
         )
         save_dir = os.path.join(self.base_save_dir, run_folder)
         os.makedirs(save_dir, exist_ok=True)
@@ -205,6 +187,11 @@ class DatasetPipeline:
 
     def _run_sample(self, sample_idx: int, sample_dir: str) -> None:
         vs = self.voltage_sweep
+
+        # Break points found by the per-peak slope test, in grid (row, col).
+        # Collected here so the sample-level detector can connect them once
+        # every peak of the sample has been swept.
+        self._break_points: List[Tuple[int, int]] = []
 
         # Every sample-level figure is also saved without its legend into
         # <sample>/figures_no_legend/, ready for legends drawn by hand for
@@ -321,8 +308,9 @@ class DatasetPipeline:
                     traceback.print_exc()
 
         # ---- 6.5 Interdot transitions (break-point connection) ----
-        # After ALL sweeping is done, connect the closest break points (where a
-        # tracked line's slope changes) and scan the sensor gradient there to
+        # Every peak whose two sweeps disagreed in slope was recorded as a
+        # break point while it was processed.  Connect the closest ones and
+        # scan the sensor gradient along each connection to
         # find the positive-slope interdot transitions the amplitude sweeps
         # miss.  Runs BEFORE the overlays and evaluation so that both the final
         # images and evaluation.txt include the interdot peaks (they are written
@@ -337,12 +325,8 @@ class DatasetPipeline:
                 vx_max=vs["vx_max"],
                 vy_min=vs["vy_min"],
                 vy_max=vs["vy_max"],
-                neighbor_px=self.interdot_neighbor_px,
+                break_points=self._break_points,
                 connect_px=self.interdot_connect_px,
-                min_slope_change=self.interdot_min_slope_change,
-                kink_window_frac=self.interdot_kink_window_frac,
-                kink_window_max=self.interdot_kink_window_max,
-                min_line_pts=self.interdot_min_line_pts,
             )
         except Exception as exc:
             import traceback
@@ -386,6 +370,45 @@ class DatasetPipeline:
 
 
     # ------------------------------------------------------------------
+    # GIF gathering
+    # ------------------------------------------------------------------
+
+    GIF_DIRNAME = "gifs"
+    GIF_COMBINED_DIRNAME = "combined"      # the all-sweeps-together animations
+    GIF_PER_SWEEP_DIRNAME = "per_sweep"    # one animation per individual sweep
+
+    def _collect_gifs(self, sample_dir: str, peak_folder: str) -> None:
+        """
+        Copy every GIF in *peak_folder* into <sample_dir>/gifs/, split in two:
+
+            gifs/combined/   peak_sweep_ALL.gif  — all four sweeps at once
+            gifs/per_sweep/  one file per sweep
+
+        Keeping them apart means the combined animations, which are the ones
+        to look at first, are not buried among four times as many per-sweep
+        files.  The flattened name keeps the ray and peak it came from, e.g.
+        ``ray_26__peak_2__ALL.gif``.
+        """
+        try:
+            rel = os.path.relpath(peak_folder, sample_dir)       # cropped_results/ray_x/peak_y
+            prefix = "__".join(rel.split(os.sep)[1:])            # ray_x__peak_y
+            gif_root = os.path.join(sample_dir, self.GIF_DIRNAME)
+            combined_dir = os.path.join(gif_root, self.GIF_COMBINED_DIRNAME)
+            per_sweep_dir = os.path.join(gif_root, self.GIF_PER_SWEEP_DIRNAME)
+
+            for name in os.listdir(peak_folder):
+                if not name.lower().endswith(".gif"):
+                    continue
+                short = name[len("peak_sweep_"):] if name.startswith("peak_sweep_") else name
+                dest_dir = (combined_dir if short.upper().startswith("ALL")
+                            else per_sweep_dir)
+                os.makedirs(dest_dir, exist_ok=True)
+                shutil.copy(os.path.join(peak_folder, name),
+                            os.path.join(dest_dir, f"{prefix}__{short}"))
+        except Exception as exc:
+            print(f"  [WARN] Could not gather GIFs for {peak_folder}: {exc}")
+
+    # ------------------------------------------------------------------
     # Hyperparameter record
     # ------------------------------------------------------------------
 
@@ -393,7 +416,7 @@ class DatasetPipeline:
         """
         Write hyperparameters.json into the sample folder.
 
-        The run-folder name only carries the short tags (_nb_, _cx_, _sl_, …);
+        The run-folder name only carries the short tags (_sl_, _cx_);
         this file spells the same values out under their full parameter names
         with a "meaning" string next to each, so a sample is self-describing
         even when it is copied out of its run folder.  JSON has no comment
@@ -413,64 +436,24 @@ class DatasetPipeline:
                     "each detected peak before the directional sweeps run."
                 ),
             },
-            "interdot_neighbor_px": {
-                "value": self.interdot_neighbor_px,
-                "folder_tag": "nb",
-                "meaning": (
-                    "Two sweep peaks within this many grid pixels are grouped "
-                    "into the same dot-to-lead line. Smaller keeps "
-                    "nearly-touching lines separate (more break-point pairs "
-                    "survive the 'must be different lines' rule); larger "
-                    "merges thick or broken bands into one line."
-                ),
-            },
             "interdot_connect_px": {
                 "value": self.interdot_connect_px,
                 "folder_tag": "cx",
                 "meaning": (
-                    "Maximum gap, in grid pixels, allowed between the break "
-                    "points of two different lines for them to be connected. "
-                    "The interdot transition is searched along that segment."
+                    "Maximum gap, in grid pixels, between two break points for "
+                    "them to be connected. The interdot transition is then "
+                    "located along that segment, at the strongest cell of the "
+                    "sensor gradient."
                 ),
             },
             "interdot_min_slope_change": {
                 "value": self.interdot_min_slope_change,
                 "folder_tag": "sl",
                 "meaning": (
-                    "Main sensitivity knob. A line only yields a break point "
-                    "if its local slope changes by more than this "
-                    "(grid-pixel slope units). Shallow honeycomb vertices "
-                    "change the slope by only ~0.3-0.6 and are silently "
-                    "rejected at 0.8 — the usual reason break points go "
-                    "undetected."
-                ),
-            },
-            "interdot_kink_window_frac": {
-                "value": self.interdot_kink_window_frac,
-                "folder_tag": "wf",
-                "meaning": (
-                    "Slope-comparison half-window, as a fraction of the line "
-                    "length. The slope before and after each interior point is "
-                    "measured over this window. Larger = more smoothing = "
-                    "kinks on long lines get straightened away."
-                ),
-            },
-            "interdot_kink_window_max": {
-                "value": self.interdot_kink_window_max,
-                "folder_tag": "wm",
-                "meaning": (
-                    "Hard cap on that half-window, in pixels (0 = uncapped). "
-                    "Capping it keeps long lines as kink-sensitive as short "
-                    "ones."
-                ),
-            },
-            "interdot_min_line_pts": {
-                "value": self.interdot_min_line_pts,
-                "folder_tag": "mlp",
-                "meaning": (
-                    "A group needs at least this many points, and this many "
-                    "distinct steps along its long axis, to count as a line "
-                    "at all."
+                    "Break-point test. A peak is a break point (a honeycomb "
+                    "vertex) when the two sweeps starting there trace slopes "
+                    "differing by more than this, in grid-pixel dcol/drow "
+                    "units. Lower = more break points."
                 ),
             },
             "figure_width_in": {
@@ -629,7 +612,11 @@ class DatasetPipeline:
         # Sweep analysis
         analysis_params = {
             "sweeps": [
-                # --- negative-slope transitions (dot-to-lead lines) ---
+                # Two sweeps, both starting AT the peak and walking in
+                # opposite directions along the dot-to-lead line.  The
+                # difference between the slopes they trace out is what
+                # identifies the peak as a break point (a honeycomb
+                # vertex) — see _break_point_from_sweeps below.
                 {
                     "name": "bottom_up_right_left",
                     "start_row": local_i,
@@ -643,43 +630,6 @@ class DatasetPipeline:
                     "start_row": local_i,
                     "row_step": -1,
                     "start_col": local_j - self.col_buffer,
-                    "col_step": +1,
-                    "col_buffer": self.col_buffer,
-                },
-                # --- positive-slope transitions (interdot lines) ---
-                #
-                # Problem with starting at center_i: the dot-to-lead line sits at
-                # ~center_j in every row and is encountered BEFORE the interdot peak
-                # (which has barely moved from center_j near the vertex).
-                #
-                # Fix:
-                #  1. Start col_buffer rows AWAY from the vertex so the interdot peak
-                #     has already shifted col_buffer columns away from the dot-to-lead peak.
-                #  2. Start 2*col_buffer columns to the RIGHT of center and scan LEFT,
-                #     so the scan reaches the interdot peak BEFORE the dot-to-lead line.
-                #
-                # At row (center_i + col_buffer):
-                #   interdot peak  ≈ center_j + col_buffer   (shifted right by B rows × ~1 col/row)
-                #   dot-to-lead    ≈ center_j                (nearly stationary)
-                # Scanning left from center_j + 2*col_buffer hits the interdot peak first. ✓
-                {
-                    "name": "interdot_bottom_up_right_to_left",
-                    "start_row": local_i + self.col_buffer,
-                    "row_step": +1,
-                    "start_col": local_j + 2 * self.col_buffer,
-                    "col_step": -1,
-                    "col_buffer": self.col_buffer,
-                },
-                # Mirror for the downward direction:
-                # At row (center_i - col_buffer):
-                #   interdot peak  ≈ center_j - col_buffer   (shifted left)
-                #   dot-to-lead    ≈ center_j
-                # Scanning right from center_j - 2*col_buffer hits the interdot peak first. ✓
-                {
-                    "name": "interdot_top_down_left_to_right",
-                    "start_row": local_i - self.col_buffer,
-                    "row_step": -1,
-                    "start_col": local_j - 2 * self.col_buffer,
                     "col_step": +1,
                     "col_buffer": self.col_buffer,
                 },
@@ -701,7 +651,26 @@ class DatasetPipeline:
         }
 
         detector = PeakDetector(output_dir=peak_folder)
-        detector.run(data_path=cropped_path, hyperparams=analysis_params)
+        sweep_results = detector.run(data_path=cropped_path,
+                                     hyperparams=analysis_params)
+
+        # Break-point test: the two sweeps both started at this peak and walked
+        # the transition line in opposite directions.  If the slopes they
+        # traced differ by more than interdot_min_slope_change, the line bends
+        # here — a honeycomb vertex, i.e. a break point.
+        from ..analysis.interdot_simple import slope_difference
+        diff = slope_difference(sweep_results["sweeps"])
+        if diff is not None and diff > self.interdot_min_slope_change:
+            self._break_points.append((center_i, center_j))
+            print(f"    break point: slope difference {diff:.2f} > "
+                  f"{self.interdot_min_slope_change}")
+
+        # Gather every GIF of this peak into <sample>/gifs/ as well, so all the
+        # sweeps of the whole sample can be browsed in one place instead of
+        # opening dozens of peak folders.  Copies, so the peak folders keep
+        # theirs; names are flattened to stay unique.
+        if self.save_gifs:
+            self._collect_gifs(sample_dir, peak_folder)
 
         # Local summary → binarisation → voltage coordinates
         summary_writer = SummaryWriter()

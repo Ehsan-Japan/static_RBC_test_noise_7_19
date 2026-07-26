@@ -38,7 +38,7 @@ def main():
         figure_height_in=12.0,
 
         # ── Dataset size ──────────────────────────────────────────────
-        n_samples=122,
+        n_samples=142,
 
         # ── Ray parameters ────────────────────────────────────────────
         num_angles=6,
@@ -73,32 +73,22 @@ def main():
         # 25-row sweep: 150 dpi = 5.8 s and 2.4 MB per GIF, 100 dpi = 4.7 s and
         # 0.75 MB, 75 dpi = 3.9 s.  Four sweeps per peak, so ~23 s per peak at
         # 150 dpi.  Drop to 100 if the GIFs are only for eyeballing the sweep.
-        gif_dpi=150,
+        gif_dpi=151,
 
         # ── Evaluation ────────────────────────────────────────────────
         peak_neighbor_cols=2,
 
         # ── Interdot break-point detection ────────────────────────────
-        # Grouping: peaks within this many grid pixels count as ONE line.
-        # Lower (2-3) keeps nearly-touching lines separate, so more
-        # break-point pairs survive the "must be different lines" rule.
-        interdot_neighbor_px=4,
-        # Max gap (grid pixels) allowed between the break points that get
-        # connected.  Raise it if valid vertex pairs sit far apart.
-        interdot_connect_px=50,
-        # MAIN SENSITIVITY KNOB.  A line only produces a break point if its
-        # local slope changes by more than this (grid-pixel slope units).
-        # At 0.8 shallow honeycomb vertices are silently rejected — this is
-        # the usual reason break points go undetected.  Try 0.25-0.4.
+        # A peak is a BREAK POINT (a honeycomb vertex) when the two sweeps that
+        # start there — one walking up the transition line, one walking down —
+        # trace slopes that differ by more than this, in grid-pixel dcol/drow
+        # units.  A straight line gives both sweeps the same slope; a vertex
+        # bends it.  Lower = more break points detected.
         interdot_min_slope_change=0.8,
-        # Slope-comparison half-window, as a fraction of the line length.
-        # Larger = more smoothing = kinks get straightened away.
-        interdot_kink_window_frac=1.0 / 6.0,
-        # Hard cap on that half-window in pixels (0 = uncapped).  Capping at
-        # ~4-6 keeps long lines as kink-sensitive as short ones.
-        interdot_kink_window_max=0,
-        # Minimum points / distinct steps for a group to count as a line.
-        interdot_min_line_pts=5,
+        # Max gap (grid pixels) allowed between the two break points that get
+        # connected.  The interdot transition is then located along that
+        # segment, at the strongest cell of the sensor gradient.
+        interdot_connect_px=50,
     )
     pipeline.run()
 
